@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@{SHA} # v7.0.1
       - run: echo hello
@@ -68,6 +68,17 @@ def test_a_workflow_without_top_level_permissions_is_flagged():
     text = CLEAN.replace("permissions:\n  contents: read\n", "")
 
     assert any("permissions" in problem for problem in problems("ci.yml", text))
+
+
+def test_a_floating_runner_image_is_flagged():
+    for image in ("ubuntu-latest", "windows-latest", "macos-latest"):
+        text = CLEAN.replace("ubuntu-24.04", image)
+
+        assert any("runner" in problem for problem in problems("ci.yml", text)), image
+
+
+def test_a_pinned_runner_image_is_allowed():
+    assert not any("runner" in problem for problem in problems("ci.yml", CLEAN))
 
 
 def test_the_workflows_in_this_repo_pass_the_guard():
