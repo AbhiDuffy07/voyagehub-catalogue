@@ -4,7 +4,8 @@ Rules (see the repo's security settings):
 - no `pull_request_target` (it runs with secrets on code from forks);
 - ci.yml, which runs on pull requests, must not reference secrets;
 - every `uses:` is pinned to a full 40-character commit SHA (a tag can be moved);
-- every workflow sets a top-level `permissions:` block.
+- every workflow sets a top-level `permissions:` block;
+- `runs-on` names a fixed runner image, never a floating `*-latest` one.
 
     python scripts/check_workflows.py [workflow_dir]
 """
@@ -16,6 +17,7 @@ from pathlib import Path
 _PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}(\s+#.*)?$")
 _USES = re.compile(r"^\s*-?\s*uses:\s*(\S.*)$")
 _TOP_LEVEL_PERMISSIONS = re.compile(r"^permissions:")
+_FLOATING_RUNNER = re.compile(r"^\s*runs-on:\s*\S*-latest")
 
 
 def problems(name: str, text: str) -> list[str]:
@@ -35,6 +37,8 @@ def problems(name: str, text: str) -> list[str]:
             found.append(f"{name}:{number}: pull_request_target is not allowed in this public repo")
         if name == "ci.yml" and "secrets." in line:
             found.append(f"{name}:{number}: ci.yml runs on pull requests and must not use secrets")
+        if _FLOATING_RUNNER.match(line):
+            found.append(f"{name}:{number}: pin the runner image (for example ubuntu-24.04)")
         uses = _USES.match(line)
         if uses:
             ref = uses.group(1).strip()
