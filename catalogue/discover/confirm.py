@@ -10,12 +10,13 @@ Wikivoyage `pageprops` gives each page's Wikidata ID (50 titles a request) and `
 gives the facts (50 items a request). No SPARQL: the query service is moving to a new backend.
 """
 
-from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from catalogue.discover.parse import ParsedDump
 from catalogue.discover.tree import Assignment
+from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 
 WIKIVOYAGE_API = "https://en.wikivoyage.org/w/api.php"
@@ -38,6 +39,9 @@ class EntityFacts:
 class CountryInfo:
     qid: str | None
     iso: str | None
+    # The sovereign states Wikidata names (P17) for a dependent territory, such as France for
+    # French Polynesia. Empty for ordinary countries.
+    parent_states: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,15 +131,46 @@ def _single_iso(facts: EntityFacts | None) -> str | None:
     return facts.iso_codes[0] if facts and len(set(facts.iso_codes)) == 1 else None
 
 
-def resolve_countries(client: PoliteClient, parsed: ParsedDump) -> dict[str, CountryInfo]:
-    """The Wikidata ID and ISO code of every country article."""
+def country_info(qid: str | None, facts: EntityFacts | None) -> CountryInfo:
+    parents = facts.countries - {qid} if facts else frozenset()
+    return CountryInfo(qid=qid, iso=_single_iso(facts), parent_states=frozenset(parents))
+
+
+def resolve_countries(
+    client: PoliteClient, parsed: ParsedDump, overrides: Mapping[str, str] | None = None
+) -> dict[str, CountryInfo]:
+    """The Wikidata ID and ISO code of every country article. An override's code always wins."""
     titles = [t for t, a in parsed.articles.items() if a.type == "country"]
     ids = fetch_wikidata_ids(client, titles)
     entities = fetch_entities(client, ids.values())
-    return {
-        title: CountryInfo(qid=ids.get(title), iso=_single_iso(entities.get(ids.get(title, ""))))
-        for title in titles
+    countries = {
+        title: country_info(ids.get(title), entities.get(ids.get(title, ""))) for title in titles
     }
+    return apply_iso_overrides(countries, overrides or {})
+
+
+def apply_iso_overrides(
+    countries: dict[str, CountryInfo], overrides: Mapping[str, str]
+) -> dict[str, CountryInfo]:
+    unknown = sorted(set(overrides) - set(countries))
+    if unknown:
+        raise PipelineError(f"country_iso overrides name no country article: {unknown[0]!r}")
+    return {
+        title: replace(info, iso=overrides[title]) if title in overrides else info
+        for title, info in countries.items()
+    }
+
+
+def _acceptable_countries(info: CountryInfo) -> frozenset[str]:
+    """What Wikidata may name as P17 for a place in this country.
+
+    The country itself always counts. A dependent territory that has its own ISO code is its own
+    catalogue country, so its sovereign state (P17 of the territory) counts too: Bora Bora is in
+    French Polynesia even though Wikidata says France. Without an ISO code of its own (Abkhazia)
+    or when the place is claimed by a different state (Sevastopol), the rule does not apply.
+    """
+    own = frozenset({info.qid}) if info.qid else frozenset()
+    return own | info.parent_states if info.iso else own
 
 
 def confirm_destinations(
@@ -178,7 +213,7 @@ def confirm_destinations(
             state, reason = "unconfirmed", "no_p17"
         elif info.qid is None:
             state, reason = "unconfirmed", "country_has_no_wikidata_id"
-        elif info.qid in facts.countries:
+        elif facts.countries & _acceptable_countries(info):
             state, reason = "confirmed", None
         else:
             state, reason = "conflict", "p17_disagrees"

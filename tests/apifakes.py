@@ -16,9 +16,9 @@ def item_claim(qid, rank="normal"):
     }
 
 
-def string_claim(value):
+def string_claim(value, rank="normal"):
     return {
-        "rank": "normal",
+        "rank": rank,
         "mainsnak": {"snaktype": "value", "datavalue": {"type": "string", "value": value}},
     }
 
