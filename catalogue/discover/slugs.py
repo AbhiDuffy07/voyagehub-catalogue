@@ -139,5 +139,9 @@ def save_registry(path: Path, registry: dict[int, RegistryEntry]) -> None:
         },
     }
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(document, indent=1, ensure_ascii=False), encoding="utf-8")
+    # LF and a final newline on every OS: the file is committed, so Windows and Linux must write
+    # the same bytes or a run on another machine would rewrite every line in the pull request.
+    temporary.write_text(
+        json.dumps(document, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
+    )
     os.replace(temporary, path)

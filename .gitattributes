@@ -1,0 +1,2 @@
+# The slug registry is committed and reviewed line by line: always LF, on every machine.
+data/*.json text eol=lf

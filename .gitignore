@@ -21,6 +21,9 @@ dumps/
 *.osm.pbf
 *.log
 
+# Left behind only if a registry save crashes half way
+data/*.tmp
+
 # Local tool files
 .claude/settings.local.json
 .vscode/

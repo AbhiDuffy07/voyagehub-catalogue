@@ -58,6 +58,11 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("data"),
         help="folder with the committed slug registry, slugs.json",
     )
+    discover.add_argument(
+        "--init-registry",
+        action="store_true",
+        help="allow a missing slug registry (a genuine first run only)",
+    )
 
     report = commands.add_parser(
         "report", help="write research files from the discover output (offline, no settings needed)"
@@ -112,6 +117,14 @@ def _discover(
     env_file: Path | str | None,
     client_factory: Callable[[Settings], PoliteClient],
 ) -> None:
+    registry_path = args.data_dir / "slugs.json"
+    if not registry_path.is_file() and not args.init_registry:
+        # A missing registry would silently restart slug assignment and could hand out slugs that
+        # differ from the published ones. In a checkout it is almost always a wrong folder.
+        raise PipelineError(
+            f"the slug registry {registry_path} does not exist; run from the repository folder "
+            "or fix --data-dir (add --init-registry only for a genuine first run)"
+        )
     settings = load_settings(environ, env_file)
     highlights = read_highlights(args.highlight_file) if args.highlight_file else []
     overrides = load_country_iso_overrides(args.overrides_dir / "country_iso.csv")
@@ -123,7 +136,7 @@ def _discover(
             dump_path=dump,
             dump_date=args.dump_date,
             out_dir=args.out_dir,
-            registry_path=args.data_dir / "slugs.json",
+            registry_path=registry_path,
             today=datetime.now(UTC).date(),
             country_iso=args.country,
             detail_countries=args.detail,

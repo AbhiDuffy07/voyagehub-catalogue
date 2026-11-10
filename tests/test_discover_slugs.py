@@ -129,6 +129,18 @@ def test_the_registry_survives_a_save_and_load(tmp_path):
     assert not list(path.parent.glob("*.tmp"))
 
 
+def test_the_saved_file_uses_unix_line_endings_and_ends_with_a_newline(tmp_path):
+    # The file is committed and reviewed: the same bytes must come out on Windows and Linux.
+    registry, _ = assign_slugs([request(7, "Jaipur"), request(8, "Agra")], {})
+    path = tmp_path / "slugs.json"
+
+    save_registry(path, registry)
+
+    raw = path.read_bytes()
+    assert b"\r" not in raw
+    assert raw.endswith(b"\n")
+
+
 def test_a_missing_registry_file_means_an_empty_registry(tmp_path):
     assert load_registry(tmp_path / "slugs.json") == {}
 
