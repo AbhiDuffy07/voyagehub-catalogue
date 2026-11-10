@@ -1,0 +1,7 @@
+# Proving batch (design: catalogue-pipeline.md section 1). One Wikivoyage title per line.
+# Swap one if its Wikivoyage data is thin. Used only to highlight rows in the discover reports.
+Jaipur
+Agra
+Varanasi
+Udaipur
+Kochi
