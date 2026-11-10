@@ -18,6 +18,7 @@ from catalogue import __version__
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import fetch_dump
 from catalogue.discover.overrides import load_country_iso_overrides
+from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
@@ -51,7 +52,43 @@ def _parser() -> argparse.ArgumentParser:
         "--overrides-dir", type=Path, default=Path("overrides"), help="folder with country_iso.csv"
     )
     discover.add_argument("--out-dir", type=Path, default=Path("out/discover"))
+
+    report = commands.add_parser(
+        "report", help="write research files from the discover output (offline, no settings needed)"
+    )
+    report.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    report.add_argument("--detail", action="append", default=[], metavar="CC")
+    report.add_argument(
+        "--category-total",
+        action="append",
+        default=[],
+        metavar="STATUS=N",
+        help="Wikivoyage category total to compare with, like usable=11233",
+    )
+    report.add_argument("--out-dir", type=Path, default=Path("out/discover"))
     return parser
+
+
+def parse_category_totals(items: Sequence[str]) -> dict[str, int]:
+    """Read STATUS=N pairs. Only usable, guide and star have a Wikivoyage category total."""
+    totals: dict[str, int] = {}
+    for item in items:
+        status, _, number = item.partition("=")
+        if status not in ("usable", "guide", "star") or not number.isdigit():
+            raise PipelineError("category total must look like usable=11233 (usable, guide, star)")
+        totals[status] = int(number)
+    return totals
+
+
+def _report(args: argparse.Namespace) -> None:
+    folder = write_research(
+        args.out_dir / args.dump_date,
+        detail_countries=args.detail,
+        category_totals=parse_category_totals(args.category_total) or None,
+    )
+    print(f"research files: {folder}")
+    for path in sorted(folder.iterdir()):
+        print(f"  {path.name}")
 
 
 def read_highlights(path: Path) -> list[str]:
@@ -144,6 +181,8 @@ def main(
     try:
         if args.command == "discover":
             _discover(args, environ, env_file, client_factory)
+        elif args.command == "report":
+            _report(args)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:
