@@ -57,3 +57,22 @@ def _assign(start: Article, parsed: ParsedDump) -> Assignment:
 
 def assign_countries(parsed: ParsedDump) -> dict[str, Assignment]:
     return {title: _assign(article, parsed) for title, article in parsed.articles.items()}
+
+
+def continent_of(title: str, parsed: ParsedDump) -> str | None:
+    """The nearest continent article above a page, found by walking all the way up the tree.
+
+    Empty when the chain never reaches one (or is a cycle, or the page is a continent itself).
+    The continent comes from the IsPartOf tree only, never from a guess.
+    """
+    article = parsed.articles.get(title)
+    seen = {title}
+    while article is not None and article.parent is not None:
+        parent = parsed.articles.get(_resolve(article.parent, parsed))
+        if parent is None or parent.title in seen:
+            return None
+        if parent.type == "continent":
+            return parent.title
+        seen.add(parent.title)
+        article = parent
+    return None

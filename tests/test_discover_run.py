@@ -28,6 +28,9 @@ PAGES = [
     page("Ranthambore", "{{IsPartOf|Rajasthan}}{{usablepark}}", page_id=11),
     page("Talsi", "{{IsPartOf|India}}{{usablecity}}{{outlinecity}}", page_id=12),
     page("Kustavi", "{{IsPartOf|Nepal|Elsewhere}}{{usablecity}}", page_id=13),
+    page("Golden Triangle", "{{IsPartOf|India}}{{usableitinerary}}", page_id=14),
+    page("Notes page", "just text, no templates", page_id=15),
+    page("Old Jaipur", "", page_id=16, redirect="Jaipur"),
 ]
 IDS = {
     "India": "Q668",
@@ -205,3 +208,68 @@ def test_the_summary_lists_world_totals_and_top_countries(client, api, dump, tmp
 
     assert "destinations: 6" in text
     assert "India" in text
+
+
+def articles(result):
+    lines = (result.output_dir / "articles.jsonl").read_text(encoding="utf-8").splitlines()
+    return {r["title"]: r for r in map(json.loads, lines)}
+
+
+def test_every_article_is_kept_not_only_the_candidates(client, api, dump, tmp_path):
+    result = run(client, dump, tmp_path)
+
+    kept = articles(result)
+    assert len(kept) == 15  # every non-redirect page in the fixture
+    assert "Asia" in kept and "Rajasthan" in kept and "Outlineville" in kept
+    assert "Old Jaipur" not in kept  # a redirect is an alias, listed in redirects.csv
+
+
+def test_each_article_has_a_role_so_nothing_is_dropped_silently(client, api, dump, tmp_path):
+    kept = articles(run(client, dump, tmp_path))
+
+    roles = {title: row["role"] for title, row in kept.items()}
+    assert roles["Jaipur"] == "destination"
+    assert roles["Outlineville"] == "destination_outline"
+    assert roles["Asia"] == "browse"
+    assert roles["India"] == "browse"
+    assert roles["Rajasthan"] == "browse"
+    assert roles["Golden Triangle"] == "later_wave"
+    assert kept["Golden Triangle"]["wave_rank"] == 1
+    assert roles["Notes page"] == "no_type"
+
+
+def test_articles_carry_their_tree_country_and_continent(client, api, dump, tmp_path):
+    kept = articles(run(client, dump, tmp_path))
+
+    jaipur = kept["Jaipur"]
+    assert (jaipur["tree_country"], jaipur["tree_country_iso"]) == ("India", "IN")
+    assert jaipur["continent"] == "Asia"
+    assert jaipur["wikidata_id"] == "Q1"
+    assert kept["India"]["tree_country_iso"] == "IN"
+    assert kept["India"]["wikidata_id"] == "Q668"
+    assert kept["Asia"]["continent"] is None
+    assert kept["Gibraltar"]["assignment_problem"] == "no_country_above"
+    assert kept["Jaipur"]["licence"] == "CC BY-SA 4.0"
+
+
+def test_redirects_are_listed(client, api, dump, tmp_path):
+    result = run(client, dump, tmp_path)
+
+    assert read_csv(result.output_dir / "redirects.csv") == [
+        {"title": "Old Jaipur", "target": "Jaipur"}
+    ]
+
+
+def test_an_iso_override_reaches_the_counts(client, api, dump, tmp_path):
+    result = run(client, dump, tmp_path, country_iso_overrides={"Nepal": "NX"})
+
+    rows = {r["country"]: r for r in read_csv(result.output_dir / "counts_by_country.csv")}
+    assert rows["Nepal"]["country_iso"] == "NX"
+    assert result.totals["overrides_applied"] == ["Nepal"]
+
+
+def test_the_manifest_counts_articles_by_role(client, api, dump, tmp_path):
+    result = run(client, dump, tmp_path)
+
+    assert result.totals["articles_by_role"]["later_wave"] == 1
+    assert result.totals["articles_by_role"]["browse"] == 5

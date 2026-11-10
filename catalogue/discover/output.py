@@ -32,6 +32,19 @@ STATUSES = ("usable", "guide", "star")
 STATES = ("confirmed", "unconfirmed", "conflict", "unassigned")
 UNASSIGNED = "(unassigned)"
 
+# What each kind of page is for. Nothing is dropped: every article is kept in articles.jsonl.
+BROWSE_TYPES = frozenset({"continent", "country", "region"})
+# Kept, typed and counted now; their listings and text come in a later wave (itineraries first).
+LATER_WAVE_RANK = {
+    "itinerary": 1,
+    "topic": 2,
+    "airport": 2,
+    "station": 2,
+    "diveguide": 2,
+    "phrasebook": 2,
+    "event": 2,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class CountRow:
@@ -108,10 +121,70 @@ def build_record(
     }
 
 
-def write_destinations(path: Path, records: Iterable[dict[str, Any]]) -> None:
+def role_of(article: Article) -> tuple[str, int | None]:
+    """(role, wave_rank). Roles: destination, destination_outline, browse, later_wave, review,
+    no_type. `review` marks rural areas, whose place in the catalogue is not decided yet."""
+    if article.type is None:
+        return "no_type", None
+    if article.type in TYPES:
+        return ("destination_outline" if article.status == "outline" else "destination"), None
+    if article.type in BROWSE_TYPES:
+        return "browse", None
+    if article.type in LATER_WAVE_RANK:
+        return "later_wave", LATER_WAVE_RANK[article.type]
+    return "review", None
+
+
+def build_article_record(
+    article: Article,
+    assignment: Assignment,
+    *,
+    tree_country_iso: str | None,
+    continent: str | None,
+    wikidata_id: str | None,
+    dump_date: str,
+    today: date,
+) -> dict[str, Any]:
+    role, wave_rank = role_of(article)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "wikivoyage_page_id": article.page_id,
+        "title": article.title,
+        "type": article.type,
+        "status": article.status,
+        "role": role,
+        "wave_rank": wave_rank,
+        "wikidata_id": wikidata_id,
+        "parent": article.parent,
+        "ancestors": list(assignment.ancestors),
+        "tree_country": assignment.country,
+        "tree_country_iso": tree_country_iso,
+        "continent": continent,
+        "assignment_problem": assignment.problem,
+        "article_problems": list(article.problems),
+        "revision_id": article.revision_id,
+        "revision_timestamp": article.timestamp,
+        "source_url": source_url(article),
+        "licence": LICENCE,
+        "licence_url": LICENCE_URL,
+        "attribution": ATTRIBUTION,
+        "dump_date": _dashed(dump_date),
+        "read_at": today.isoformat(),
+    }
+
+
+def write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
     ordered = sorted(records, key=lambda r: r["wikivoyage_page_id"])
     lines = (json.dumps(r, ensure_ascii=False, sort_keys=True) for r in ordered)
-    write_text(path, "".join(f"{line}\n" for line in lines))
+    write_text(path, "".join(line + "\n" for line in lines))
+
+
+def write_redirects(path: Path, redirects: Mapping[str, str]) -> None:
+    write_text(path, _csv_text(["title", "target"], sorted(redirects.items())))
+
+
+def write_destinations(path: Path, records: Iterable[dict[str, Any]]) -> None:
+    write_jsonl(path, records)
 
 
 def write_counts(path: Path, rows: Sequence[CountRow]) -> None:

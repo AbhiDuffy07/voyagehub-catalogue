@@ -54,6 +54,8 @@ def api(dump_bytes):
 
 def discover(argv, capsys, tmp_path):
     args = ["discover", "--dumps-dir", str(tmp_path / "dumps"), "--out-dir", str(tmp_path / "out")]
+    if "--overrides-dir" not in argv:  # never read the repo's real overrides in a test
+        args += ["--overrides-dir", str(tmp_path / "no-overrides")]
     code = main(
         [*args, *argv],
         environ={"CONTACT_EMAIL": EMAIL},
@@ -120,3 +122,32 @@ def test_the_discover_help_is_listed(capsys):
         main(["--help"], environ={}, env_file=None)
 
     assert "discover" in capsys.readouterr().out
+
+
+def test_discover_applies_the_country_iso_overrides_file(api, capsys, tmp_path):
+    folder = tmp_path / "ov"
+    folder.mkdir()
+    (folder / "country_iso.csv").write_text(
+        "country,country_iso,reason\nIndia,ZZ,test only\n", encoding="utf-8"
+    )
+
+    code, out, err = discover(
+        ["--dump-date", DATE, "--overrides-dir", str(folder)], capsys, tmp_path
+    )
+
+    assert (code, err) == (0, "")
+    rows = (tmp_path / "out" / DATE / "destinations.jsonl").read_text(encoding="utf-8")
+    assert json.loads(rows)["country_iso"] == "ZZ"
+
+
+def test_an_override_for_an_unknown_country_is_a_clean_error(api, capsys, tmp_path):
+    folder = tmp_path / "ov"
+    folder.mkdir()
+    (folder / "country_iso.csv").write_text(
+        "country,country_iso,reason\nAtlantis,AT,test only\n", encoding="utf-8"
+    )
+
+    code, _, err = discover(["--dump-date", DATE, "--overrides-dir", str(folder)], capsys, tmp_path)
+
+    assert code == 1
+    assert "Atlantis" in err

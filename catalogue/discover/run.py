@@ -6,7 +6,7 @@ kept between runs because it is the only record of the slugs handed out so far.
 """
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,7 +17,8 @@ from catalogue.discover.confirm import Confirmation, confirm_destinations, resol
 from catalogue.discover.dump import sha1_of
 from catalogue.discover.parse import Article, parse_dump
 from catalogue.discover.slugs import SlugRequest, assign_slugs, load_registry, save_registry
-from catalogue.discover.tree import Assignment, assign_countries
+from catalogue.discover.territories import resolve_territories
+from catalogue.discover.tree import Assignment, assign_countries, continent_of
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 
@@ -101,11 +102,14 @@ def run_discover(
     country_iso: str | None = None,
     detail_countries: Sequence[str] = (),
     highlight_titles: Sequence[str] = (),
+    country_iso_overrides: Mapping[str, str] | None = None,
 ) -> DiscoverResult:
     country_filter = country_iso.upper() if country_iso else None
     parsed = parse_dump(dump_path)
     assignments = assign_countries(parsed)
-    countries = resolve_countries(client, parsed)
+    overrides = country_iso_overrides or {}
+    countries = resolve_countries(client, parsed, overrides)
+    assignments, countries = resolve_territories(client, assignments, countries)
     iso_by_country = {title: info.iso for title, info in countries.items()}
 
     def in_filter(title: str) -> bool:
@@ -146,9 +150,26 @@ def run_discover(
     )
     counts = _count_rows(parsed.articles, assignments, confirmations, iso_by_country, scope)
 
+    # Every article is kept (continents, countries, regions, itineraries, topics, airports, ...),
+    # so nothing is lost for browsing or for later waves.
+    article_records = [
+        output.build_article_record(
+            parsed.articles[t],
+            assignments[t],
+            tree_country_iso=iso_by_country.get(assignments[t].country or ""),
+            continent=continent_of(t, parsed),
+            wikidata_id=_wikidata_id(t, confirmations, countries),
+            dump_date=dump_date,
+            today=today,
+        )
+        for t in sorted(scope)
+    ]
+
     folder = f"{dump_date}-{country_filter}" if country_filter else dump_date
     target = out_dir / folder
     output.write_destinations(target / "destinations.jsonl", records)
+    output.write_jsonl(target / "articles.jsonl", article_records)
+    output.write_redirects(target / "redirects.csv", parsed.redirects)
     output.write_counts(target / "counts_by_country.csv", counts)
     output.write_conflicts(target / "conflicts.csv", records)
     output.write_unassigned(target / "unassigned.csv", records)
@@ -176,6 +197,8 @@ def run_discover(
         "by_status": dict(Counter(r["status"] for r in records)),
         "confirmation": {s: sum(r["confirmation"] == s for r in records) for s in output.STATES},
         "excluded": len(excluded),
+        "articles_by_role": dict(Counter(r["role"] for r in article_records)),
+        "overrides_applied": sorted(overrides),
         "slug_events": dict(Counter(e.kind for e in slug_events)),
     }
     output.write_manifest(
@@ -228,3 +251,11 @@ def _write_detail(
 
 def _tree_iso(record: dict[str, Any], iso_by_country: dict[str, str | None]) -> str | None:
     return iso_by_country.get(record["country"]) if record["country"] else None
+
+
+def _wikidata_id(
+    title: str, confirmations: dict[str, Confirmation], countries: dict[str, Any]
+) -> str | None:
+    if title in confirmations:
+        return confirmations[title].wikidata_id
+    return countries[title].qid if title in countries else None

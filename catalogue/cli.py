@@ -17,6 +17,7 @@ import psycopg
 from catalogue import __version__
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import fetch_dump
+from catalogue.discover.overrides import load_country_iso_overrides
 from catalogue.discover.run import run_discover
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
@@ -46,6 +47,9 @@ def _parser() -> argparse.ArgumentParser:
         "--highlight-file", type=Path, help="destination titles to show in the detail reports"
     )
     discover.add_argument("--dumps-dir", type=Path, default=Path("dumps"))
+    discover.add_argument(
+        "--overrides-dir", type=Path, default=Path("overrides"), help="folder with country_iso.csv"
+    )
     discover.add_argument("--out-dir", type=Path, default=Path("out/discover"))
     return parser
 
@@ -67,6 +71,7 @@ def _discover(
 ) -> None:
     settings = load_settings(environ, env_file)
     highlights = read_highlights(args.highlight_file) if args.highlight_file else []
+    overrides = load_country_iso_overrides(args.overrides_dir / "country_iso.csv")
     client = client_factory(settings)
     try:
         dump = fetch_dump(client, args.dump_date, args.dumps_dir)
@@ -79,6 +84,7 @@ def _discover(
             country_iso=args.country,
             detail_countries=args.detail,
             highlight_titles=highlights,
+            country_iso_overrides=overrides,
         )
     finally:
         client.close()

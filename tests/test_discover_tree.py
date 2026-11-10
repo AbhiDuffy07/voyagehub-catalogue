@@ -1,5 +1,5 @@
 from catalogue.discover.parse import Article, ParsedDump
-from catalogue.discover.tree import assign_countries
+from catalogue.discover.tree import assign_countries, continent_of
 
 
 def art(title, kind, parent=None, *, problems=()):
@@ -100,3 +100,42 @@ def test_a_chain_that_ends_without_a_country_is_reported():
     parsed = world(art("Asia", "continent"), art("Caucasus", "region", "Asia"))
 
     assert assign_countries(parsed)["Caucasus"].problem == "no_country_above"
+
+
+def test_the_continent_is_found_by_walking_all_the_way_up():
+    parsed = world(
+        art("Asia", "continent"),
+        art("South Asia", "region", "Asia"),
+        art("India", "country", "South Asia"),
+        art("Jaipur", "city", "India"),
+    )
+
+    assert continent_of("Jaipur", parsed) == "Asia"
+    assert continent_of("India", parsed) == "Asia"
+
+
+def test_a_continent_has_no_continent_of_its_own():
+    assert continent_of("Asia", world(art("Asia", "continent"))) is None
+
+
+def test_the_continent_is_empty_when_the_chain_never_reaches_one():
+    parsed = world(art("Island", "region", "Nowhere"), art("Loner", "city"))
+
+    assert continent_of("Island", parsed) is None
+    assert continent_of("Loner", parsed) is None
+
+
+def test_a_cycle_gives_no_continent():
+    parsed = world(art("A", "region", "B"), art("B", "region", "A"))
+
+    assert continent_of("A", parsed) is None
+
+
+def test_a_redirect_in_the_chain_is_followed_to_the_continent():
+    parsed = world(
+        art("Asia", "continent"),
+        art("India", "country", "Asia region"),
+        redirects={"Asia region": "Asia"},
+    )
+
+    assert continent_of("India", parsed) == "Asia"
