@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. Only the skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI). The jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and the first job, `discover`, works. It writes local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -25,6 +25,15 @@ python -m venv .venv
 .venv\Scripts\python -m ruff format --check .
 .venv\Scripts\python -m catalogue --help
 ```
+
+### `discover` and `report`
+
+```text
+.venv\Scripts\python -m catalogue discover --dump-date 20261101 --detail IN --highlight-file config/proving_batch.txt
+.venv\Scripts\python -m catalogue report --dump-date 20261101 --detail IN --category-total usable=11233
+```
+
+`discover` downloads the Wikivoyage dump into `dumps/` (checked against Wikimedia's published SHA-1), finds every destination, assigns each to a country, confirms the country with Wikidata, and writes local files to `out/discover/<dump date>/` (both folders are gitignored). It keeps **every** article, not only the destinations. `report` turns those files into research tables and a plain-language summary. `overrides/country_iso.csv` holds hand-checked country codes, each with a written reason.
 
 Settings come from environment variables (names only in [.env.example](.env.example)); a local `.env` file is read when present. Nothing secret is ever committed.
 
