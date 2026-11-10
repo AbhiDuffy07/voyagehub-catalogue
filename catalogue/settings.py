@@ -12,12 +12,13 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from catalogue import __version__
+from catalogue.errors import PipelineError
 
 DEFAULT_WEBSITE = "https://github.com/AbhiDuffy07/voyagehub-catalogue"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+$")
 
 
-class SettingsError(Exception):
+class SettingsError(PipelineError):
     """A required setting is missing or malformed. The message never contains a value."""
 
 

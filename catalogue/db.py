@@ -11,6 +11,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
 
+from catalogue.errors import PipelineError
+
 EXPECTED_ROLE = "catalogue_importer"
 CONNECT_TIMEOUT_SECONDS = 15
 
@@ -18,11 +20,11 @@ CONNECT_TIMEOUT_SECONDS = 15
 _WEAK_SSL_MODES = {"disable", "allow", "prefer"}
 
 
-class DatabaseUnavailable(Exception):
+class DatabaseUnavailable(PipelineError):
     """The database could not be reached or queried. The message holds only the error's class."""
 
 
-class WrongRoleError(Exception):
+class WrongRoleError(PipelineError):
     """The login is not the importer role."""
 
 

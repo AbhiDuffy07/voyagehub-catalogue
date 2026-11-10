@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 
 import httpx
 
+from catalogue.errors import PipelineError
 from catalogue.settings import Settings, user_agent
 
 MAX_CONCURRENT = 3
@@ -24,7 +25,7 @@ TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
 
 
-class UpstreamError(Exception):
+class UpstreamError(PipelineError):
     """The server could not give a usable answer. `status` is None for network failures."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
