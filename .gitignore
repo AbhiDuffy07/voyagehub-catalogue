@@ -1,0 +1,27 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Pipeline output and big downloads (no heavy generated files in git)
+out/
+catalogue/out/
+dumps/
+*.xml.bz2
+*.osm.pbf
+*.log
+
+# Local tool files
+.claude/settings.local.json
+.vscode/
+.idea/
