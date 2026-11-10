@@ -7,6 +7,8 @@ import pytest
 import respx
 
 from catalogue.discover.run import run_discover
+from catalogue.discover.slugs import RegistryEntry, save_registry
+from catalogue.errors import PipelineError
 from tests.apifakes import fake_wikidata, fake_wikivoyage
 from tests.dumpfixture import write_dump
 from tests.synthetic_world import ENTITIES, IDS, PAGES
@@ -29,7 +31,12 @@ def dump(tmp_path):
     return write_dump(tmp_path / "dump.xml.bz2", PAGES)
 
 
+def registry_file(tmp_path):
+    return tmp_path / "data" / "slugs.json"
+
+
 def run(client, dump, tmp_path, **kwargs):
+    kwargs.setdefault("registry_path", registry_file(tmp_path))
     return run_discover(
         client,
         dump_path=dump,
@@ -236,3 +243,43 @@ def test_the_manifest_counts_articles_by_role(client, api, dump, tmp_path):
 
     assert result.totals["articles_by_role"]["later_wave"] == 1
     assert result.totals["articles_by_role"]["browse"] == 5
+
+
+def test_the_registry_goes_to_the_given_path_and_not_to_the_output_folder(
+    client, api, dump, tmp_path
+):
+    run(client, dump, tmp_path)
+
+    entries = json.loads(registry_file(tmp_path).read_text(encoding="utf-8"))["entries"]
+    assert entries["5"] == {"slug": "jaipur", "title": "Jaipur"}
+    assert not (tmp_path / "out" / "slugs.json").exists()
+
+
+def test_a_slug_already_in_the_registry_is_kept(client, api, dump, tmp_path):
+    save_registry(registry_file(tmp_path), {5: RegistryEntry("jaipur-classic", "Jaipur")})
+
+    result = run(client, dump, tmp_path)
+
+    assert records(result)["Jaipur"]["slug"] == "jaipur-classic"
+
+
+def test_a_renamed_page_keeps_its_slug_and_the_rename_is_logged(client, api, dump, tmp_path):
+    save_registry(registry_file(tmp_path), {5: RegistryEntry("jaipur", "Old Jaipur Name")})
+
+    result = run(client, dump, tmp_path)
+
+    assert records(result)["Jaipur"]["slug"] == "jaipur"
+    events = read_csv(result.output_dir / "slug_events.csv")
+    assert [(e["kind"], e["page_id"], e["slug"]) for e in events] == [("rename", "5", "jaipur")]
+
+
+def test_a_damaged_registry_stops_the_run_before_anything_is_written(client, api, dump, tmp_path):
+    path = registry_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(PipelineError, match="slug registry"):
+        run(client, dump, tmp_path)
+
+    assert path.read_text(encoding="utf-8") == "{not json"
+    assert not (tmp_path / "out" / "20261101").exists()

@@ -30,6 +30,7 @@ def dump_dir(client, tmp_path):
             dump_date="20261101",
             out_dir=tmp_path / "out",
             today=date(2026, 11, 10),
+            registry_path=tmp_path / "data" / "slugs.json",
         )
     return result.output_dir
 

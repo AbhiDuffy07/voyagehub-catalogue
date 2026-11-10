@@ -56,6 +56,8 @@ def discover(argv, capsys, tmp_path):
     args = ["discover", "--dumps-dir", str(tmp_path / "dumps"), "--out-dir", str(tmp_path / "out")]
     if "--overrides-dir" not in argv:  # never read the repo's real overrides in a test
         args += ["--overrides-dir", str(tmp_path / "no-overrides")]
+    if "--data-dir" not in argv:  # never touch the repo's committed data/slugs.json in a test
+        args += ["--data-dir", str(tmp_path / "data")]
     code = main(
         [*args, *argv],
         environ={"CONTACT_EMAIL": EMAIL},
@@ -75,6 +77,32 @@ def test_discover_downloads_verifies_runs_and_prints_counts(api, capsys, tmp_pat
     assert (tmp_path / "dumps" / DATE / NAME).is_file()
     rows = (tmp_path / "out" / DATE / "destinations.jsonl").read_text(encoding="utf-8")
     assert json.loads(rows)["slug"] == "jaipur"
+
+
+def test_discover_writes_the_slug_registry_to_the_data_dir_not_the_out_dir(api, capsys, tmp_path):
+    code, _, err = discover(["--dump-date", DATE], capsys, tmp_path)
+
+    assert (code, err) == (0, "")
+    registry = json.loads((tmp_path / "data" / "slugs.json").read_text(encoding="utf-8"))
+    assert registry["entries"]["5"]["slug"] == "jaipur"
+    assert not (tmp_path / "out" / "slugs.json").exists()
+
+
+def test_discover_keeps_slugs_already_in_the_data_dir_registry(api, capsys, tmp_path):
+    folder = tmp_path / "other-data"
+    folder.mkdir()
+    (folder / "slugs.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "entries": {"5": {"slug": "jaipur-classic", "title": "Jaipur"}}}
+        ),
+        encoding="utf-8",
+    )
+
+    code, _, err = discover(["--dump-date", DATE, "--data-dir", str(folder)], capsys, tmp_path)
+
+    assert (code, err) == (0, "")
+    rows = (tmp_path / "out" / DATE / "destinations.jsonl").read_text(encoding="utf-8")
+    assert json.loads(rows)["slug"] == "jaipur-classic"
 
 
 def test_discover_never_prints_the_contact_address(api, capsys, tmp_path):

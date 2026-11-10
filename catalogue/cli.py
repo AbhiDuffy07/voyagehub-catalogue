@@ -52,6 +52,12 @@ def _parser() -> argparse.ArgumentParser:
         "--overrides-dir", type=Path, default=Path("overrides"), help="folder with country_iso.csv"
     )
     discover.add_argument("--out-dir", type=Path, default=Path("out/discover"))
+    discover.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="folder with the committed slug registry, slugs.json",
+    )
 
     report = commands.add_parser(
         "report", help="write research files from the discover output (offline, no settings needed)"
@@ -117,6 +123,7 @@ def _discover(
             dump_path=dump,
             dump_date=args.dump_date,
             out_dir=args.out_dir,
+            registry_path=args.data_dir / "slugs.json",
             today=datetime.now(UTC).date(),
             country_iso=args.country,
             detail_countries=args.detail,

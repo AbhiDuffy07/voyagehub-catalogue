@@ -1,8 +1,9 @@
 """The `discover` job: dump -> tree -> countries -> Wikidata check -> slugs -> local files.
 
 No database is touched (the importer login arrives in B15). Output goes to
-`<out_dir>/<dump date>[-<CC>]/`, and the slug registry to `<out_dir>/slugs.json`, which must be
-kept between runs because it is the only record of the slugs handed out so far.
+`<out_dir>/<dump date>[-<CC>]/`. The slug registry is the committed `data/slugs.json` (the CLI
+passes its path): it is the only record of the slugs handed out so far, so it changes only through
+a reviewed pull request and is never kept under the gitignored `out/`.
 """
 
 from collections import Counter
@@ -98,6 +99,7 @@ def run_discover(
     dump_path: Path,
     dump_date: str,
     out_dir: Path,
+    registry_path: Path,
     today: date,
     country_iso: str | None = None,
     detail_countries: Sequence[str] = (),
@@ -122,7 +124,6 @@ def run_discover(
     candidates = sorted(t for t in scope if _is_candidate(parsed.articles[t]))
     confirmations = confirm_destinations(client, candidates, assignments, countries)
 
-    registry_path = out_dir / "slugs.json"
     registry, slug_events = assign_slugs(
         [
             SlugRequest(parsed.articles[t].page_id, t, confirmations[t].country_iso)
