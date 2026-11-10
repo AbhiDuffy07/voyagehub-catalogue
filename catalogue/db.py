@@ -45,6 +45,12 @@ def require_tls(url: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+def tls_in_use(connection: Any) -> bool:
+    """Ask Postgres whether this very connection is encrypted (not just whether we asked)."""
+    row = connection.execute("select ssl from pg_stat_ssl where pid = pg_backend_pid()").fetchone()
+    return bool(row and row[0])
+
+
 def connect(
     url: str, *, driver: Callable[..., Any] = psycopg.connect
 ) -> psycopg.Connection[tuple[Any, ...]]:

@@ -1,7 +1,7 @@
 import psycopg
 import pytest
 
-from catalogue.db import DatabaseUnavailable, WrongRoleError, connect, require_tls
+from catalogue.db import DatabaseUnavailable, WrongRoleError, connect, require_tls, tls_in_use
 
 SECRET = "s3cret-pw"
 URL = f"postgresql://catalogue_importer.projref:{SECRET}@db.example.invalid:5432/postgres"
@@ -113,3 +113,27 @@ def test_the_real_driver_failing_on_a_bad_url_is_wrapped_without_the_password():
         connect(bad_port)
 
     assert SECRET not in str(error.value)
+
+
+class SslRow:
+    def __init__(self, row):
+        self.row = row
+
+    def execute(self, sql: str):
+        assert "pg_stat_ssl" in sql
+        return self
+
+    def fetchone(self):
+        return self.row
+
+
+def test_tls_in_use_is_true_when_postgres_reports_ssl():
+    assert tls_in_use(SslRow((True,))) is True
+
+
+def test_tls_in_use_is_false_when_postgres_reports_no_ssl():
+    assert tls_in_use(SslRow((False,))) is False
+
+
+def test_tls_in_use_is_false_when_there_is_no_row():
+    assert tls_in_use(SslRow(None)) is False
