@@ -17,14 +17,18 @@ from typing import Any
 from catalogue.discover.dump import sha1_of
 from catalogue.discover.output import _csv_text, write_manifest, write_text
 from catalogue.discover.parse import DumpPage, iter_pages
-from catalogue.discover.slugs import RegistryEntry, load_registry, slugify
+from catalogue.discover.slugs import RegistryEntry, load_registry
 from catalogue.errors import PipelineError
 from catalogue.listings import report
-from catalogue.listings.keys import KeyInput, assign_keys
+from catalogue.listings.keys import KEY_VERSION, KeyInput, assign_keys, key_slug
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
 from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
-from catalogue.listings.wikitext import RawListing, parse_page
+from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
+
+
+# Typed markers on these page types are real places on the rendered page, so they become listings.
+MARKER_LISTING_PAGE_TYPES = frozenset({"city", "district", "park"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +82,7 @@ class _Tally:
         self.by_kind: Counter[str] = Counter()
         self.by_role: Counter[str] = Counter()
         self.pages_read = 0
+        self.marker_listings = 0
         self.pages_not_in_articles = 0
         self.via_district = 0
         self.owner_unresolved = 0
@@ -87,7 +92,7 @@ class _Tally:
         return self.stats.setdefault(label, report.CountryStats(label, iso or ""))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _PageRows:
     """Everything one page contributes, built before any of it is written."""
 
@@ -98,6 +103,7 @@ class _PageRows:
     counted: list[tuple[RawListing, str]]  # listing, the section it sits under
     owner: Owner | None
     region: str
+    marker_listings: int = 0
 
 
 def _build_page(
@@ -131,7 +137,18 @@ def _build_page(
         ancestors[-2] if len(ancestors) >= 2 else "(directly under the country)",
     )
     ordinal = 0
+    marker_number = 0
+    marker_listings_allowed = row["type"] in MARKER_LISTING_PAGE_TYPES
     for number, section in enumerate(content.sections, start=1):
+        items = list(section.listings)
+        for marker in section.markers:
+            promoted = marker_listing(marker) if marker_listings_allowed else None
+            if promoted is not None:
+                items.append(promoted)
+                built.marker_listings += 1
+            else:
+                marker_number += 1
+                built.markers.append({**page_fields, **prov, **marker, "ordinal": marker_number})
         built.sections.append(
             {
                 **page_fields,
@@ -141,14 +158,14 @@ def _build_page(
                 "standard": section.standard,
                 "kind": section.kind,
                 "text": section.text,
-                "listing_count": section.listing_count,
+                "listing_count": len(items),
                 "ordinal": number,
             }
         )
-        for listing in section.listings:
+        for listing in items:
             ordinal += 1
             fields = listing.fields
-            base = f"{listing.kind}:{slugify(fields['name']) or 'unnamed'}"
+            base = f"{listing.kind}:{key_slug(fields['name'])}"
             built.key_inputs.append(
                 KeyInput(
                     scope=owner.page_id if owner else dump_page.page_id,
@@ -173,6 +190,8 @@ def _build_page(
                     "section_key": section.key,
                     "ordinal": ordinal,
                     "listing_key": base,  # made unique when the files are finished
+                    "key_version": KEY_VERSION,
+                    "from_marker": listing.from_marker,
                     "owner_page_id": owner.page_id if owner else None,
                     "owner_title": owner.title if owner else "",
                     "owner_type": owner.type if owner else None,
@@ -182,8 +201,6 @@ def _build_page(
                 }
             )
             built.counted.append((listing, section.key))
-    for number, marker in enumerate(content.markers, start=1):
-        built.markers.append({**page_fields, **prov, **marker, "ordinal": number})
     return built
 
 
@@ -240,6 +257,7 @@ def run_fetch_listings(
                 tally.failures.append((dump_page.page_id, dump_page.title, type(exc).__name__))
                 continue
             tally.pages_read += 1
+            tally.marker_listings += built.marker_listings
             stats = tally.country(row["tree_country"], row["tree_country_iso"])
             for section_row in built.sections:
                 sections_out.add(section_row)
@@ -274,6 +292,7 @@ def run_fetch_listings(
         "listings": listings_out.count,
         "sections": sections_out.count,
         "markers": markers_out.count,
+        "marker_listings": tally.marker_listings,
         "via_district": tally.via_district,
         "owner_unresolved": tally.owner_unresolved,
         "by_kind": dict(tally.by_kind),

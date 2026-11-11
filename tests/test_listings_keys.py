@@ -1,6 +1,12 @@
 from itertools import permutations
 
-from catalogue.listings.keys import KeyInput, assign_keys
+from catalogue.listings.keys import (
+    KEY_VERSION,
+    MAX_SLUG_LENGTH,
+    KeyInput,
+    assign_keys,
+    key_slug,
+)
 
 
 def item(page_id, ordinal, name="dutch-palace", *, scope=3, kind="see", **fields):
@@ -90,3 +96,51 @@ def test_keys_do_not_depend_on_the_order_the_listings_are_read_in():
     expected = assign_keys(items)
     for ordering in permutations(items):
         assert assign_keys(ordering) == expected
+
+
+# --- Unicode keys (key_version 2) -------------------------------------------------------------
+
+
+def test_key_slug_keeps_letters_of_every_script_and_lowercases():
+    assert key_slug("Chand Baori") == "chand-baori"
+    assert key_slug("清水寺") == "清水寺"
+    assert key_slug("ताज महल") == "ताज-महल"  # combining vowel signs are kept
+    assert key_slug("Rådhuset Ø") == "rådhuset-ø"
+
+
+def test_key_slug_is_the_same_for_composed_and_decomposed_text():
+    assert key_slug("Café Zürich") == key_slug("Café Zürich") == "café-zürich"
+
+
+def test_key_slug_folds_case_and_compatibility_forms():
+    assert key_slug("Straße") == "strasse"
+    assert key_slug("ＡＢＣ  Ｔower") == "abc-tower"
+
+
+def test_key_slug_replaces_punctuation_and_the_key_separators():
+    assert key_slug("Fort: St. George ~ (old)") == "fort-st-george-old"
+
+
+def test_key_slug_of_nothing_readable_is_unnamed():
+    assert key_slug("") == "unnamed"
+    assert key_slug(" !?- ") == "unnamed"
+
+
+def test_key_slug_caps_long_names_and_keeps_them_distinct_with_a_hash():
+    stem = "the-very-long-name " * 10
+    a, b = key_slug(stem + "north"), key_slug(stem + "south")
+
+    assert len(a) <= MAX_SLUG_LENGTH and len(b) <= MAX_SLUG_LENGTH
+    assert a != b
+    assert a == key_slug(stem + "north")  # stable
+    assert key_slug("short name") == "short-name"  # short names are untouched
+
+
+def test_the_cap_counts_characters_not_bytes():
+    name = "寺" * 200
+
+    assert len(key_slug(name)) <= MAX_SLUG_LENGTH
+
+
+def test_key_version_is_two_because_the_ascii_keys_were_never_loaded():
+    assert KEY_VERSION == 2

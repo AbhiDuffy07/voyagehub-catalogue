@@ -92,6 +92,7 @@ class RawListing:
     fields: dict[str, str]
     extra: dict[str, str]
     repeated_params: tuple[str, ...] = ()
+    from_marker: bool = False  # built from a typed {{marker}}, so most fields are empty
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,7 @@ class Section:
     kind: str  # lead, prose, destination_list
     text: str
     listings: list[RawListing] = field(default_factory=list)
+    markers: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def listing_count(self) -> int:
@@ -165,6 +167,17 @@ def _marker(template: Template) -> dict[str, str]:
     return {name: values.get(name, "") for name in MARKER_FIELDS}
 
 
+def marker_listing(marker: dict[str, str]) -> RawListing | None:
+    """A typed marker (go, see, eat, ...) as a listing; None for untyped or other marker types."""
+    kind = marker["type"].strip().lower()
+    if kind not in KINDS or kind == "listing":
+        return None
+    fields = {name: "" for name in FIELDS}
+    fields.update(name=marker["name"], lat=marker["lat"], long=marker["long"])
+    fields["wikidata"] = marker["wikidata"]
+    return RawListing(kind, "", fields, {}, (), from_marker=True)
+
+
 def _heading_text(heading: Heading) -> str:
     return " ".join(heading.title.strip_code().split())
 
@@ -193,19 +206,21 @@ def _build_section(
 ) -> Section | None:
     code = Wikicode(nodes)
     listings: list[RawListing] = []
+    own_markers: list[dict[str, str]] = []
     for template in _walk(code):
         if _template_name(template) == "marker":
-            markers.append(_marker(template))
+            own_markers.append(_marker(template))
         else:
             listings.append(_listing(template))
+    markers.extend(own_markers)
     text = _plain_text(code)
     if heading is None:
         if not text and not listings:
             return None
-        return Section("", "lead", True, "lead", text, listings)
+        return Section("", "lead", True, "lead", text, listings, own_markers)
     key = section_key(heading)
     kind = "destination_list" if key in DESTINATION_LISTS else "prose"
-    return Section(heading, key, key in STANDARD_SECTIONS, kind, text, listings)
+    return Section(heading, key, key in STANDARD_SECTIONS, kind, text, listings, own_markers)
 
 
 def parse_page(text: str) -> PageContent:
