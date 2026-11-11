@@ -1,0 +1,144 @@
+"""Counts and Markdown reports for `fetch-listings`. Counts and titles only, never listing text."""
+
+import re
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+NO_COUNTRY = "(no country)"
+KIND_ORDER = ("see", "do", "buy", "eat", "drink", "sleep", "go", "listing")
+_YEAR = re.compile(r"^(\d{4})")
+
+
+@dataclass(slots=True)
+class CountryStats:
+    name: str
+    iso: str
+    by_kind: Counter[str] = field(default_factory=Counter)
+    by_owner_status: Counter[str] = field(default_factory=Counter)
+    by_section: Counter[str] = field(default_factory=Counter)
+    by_region: Counter[str] = field(default_factory=Counter)
+    lastedit_years: Counter[str] = field(default_factory=Counter)
+    own: int = 0
+    from_districts: int = 0
+    owner_unresolved: int = 0
+
+    @property
+    def total(self) -> int:
+        return sum(self.by_kind.values())
+
+
+def lastedit_bucket(raw: str, *, latest_year: int) -> str:
+    """The year of a well-formed `lastedit`, else a label. B3b parses dates properly."""
+    if not raw:
+        return "(none)"
+    match = _YEAR.match(raw)
+    if match and 2003 <= int(match.group(1)) <= latest_year:
+        return match.group(1)
+    return "(unparsed)"
+
+
+def counts_by_country_rows(stats: Mapping[str, CountryStats]) -> tuple[list[str], list[list[Any]]]:
+    header = [
+        "country",
+        "country_iso",
+        *KIND_ORDER,
+        "total",
+        "own_page",
+        "from_districts",
+        "owner_unresolved",
+    ]
+    ordered = sorted(stats.values(), key=lambda s: (s.name == NO_COUNTRY, s.name))
+    rows = [
+        [
+            s.name,
+            s.iso,
+            *(s.by_kind.get(k, 0) for k in KIND_ORDER),
+            s.total,
+            s.own,
+            s.from_districts,
+            s.owner_unresolved,
+        ]
+        for s in ordered
+    ]
+    return header, rows
+
+
+def render_report(
+    totals: Mapping[str, Any],
+    stats: Mapping[str, CountryStats],
+    largest: Sequence[tuple[str, int, int]],
+    *,
+    dump_date: str,
+) -> str:
+    lines = [
+        f"# fetch-listings report: Wikivoyage dump {dump_date}",
+        "",
+        f"- pages read: {totals['pages_read']} "
+        f"(not in the article list: {totals['pages_not_in_articles']})",
+        f"- listings: {totals['listings']} (from districts, rolled up: {totals['via_district']}; "
+        f"no owner: {totals['owner_unresolved']})",
+        f"- section texts: {totals['sections']}",
+        f"- map markers (not listings): {totals['markers']}",
+        "",
+        "## Listings by type",
+        "",
+        "| Type | Listings |",
+        "|---|---|",
+    ]
+    lines += [f"| {k} | {totals['by_kind'].get(k, 0)} |" for k in KIND_ORDER]
+    lines += ["", "## Listings by page role", "", "| Role | Listings |", "|---|---|"]
+    lines += [f"| {role} | {n} |" for role, n in sorted(totals["by_role"].items())]
+    lines += ["", "## Countries with the most listings", "", "| Country | Listings |", "|---|---|"]
+    ranked = sorted(stats.values(), key=lambda s: (-s.total, s.name))[:15]
+    lines += [f"| {s.name} | {s.total} |" for s in ranked]
+    lines += ["", "## Largest owners (checks the 25 MiB Pages file limit later)", ""]
+    lines += ["| Owner | Own page | From districts |", "|---|---|---|"]
+    lines += [f"| {title} | {own} | {districts} |" for title, own, districts in largest]
+    return "\n".join(lines) + "\n"
+
+
+def _table(
+    lines: list[str],
+    title: str,
+    heading: str,
+    counter: Mapping[str, int],
+    order: Sequence[str] = (),
+) -> None:
+    keys = [k for k in order if k in counter] or sorted(counter, key=lambda k: (-counter[k], k))
+    lines.extend([f"## {title}", "", f"| {heading} | Listings |", "|---|---|"])
+    lines.extend(f"| {k} | {counter[k]} |" for k in keys)
+    lines.append("")
+
+
+def render_detail(iso: str, stats: CountryStats, *, dump_date: str) -> str:
+    lines = [
+        f"# {stats.name} ({iso}): listings",
+        "",
+        f"Wikivoyage dump {dump_date}. {stats.total} listings: {stats.own} on the owner's own "
+        f"page, {stats.from_districts} rolled up from district pages, "
+        f"{stats.owner_unresolved} with no owner.",
+        "",
+    ]
+    _table(lines, "By type", "Type", stats.by_kind, KIND_ORDER)
+    _table(lines, "By region", "Region", stats.by_region)
+    _table(lines, "By owner status", "Status", stats.by_owner_status)
+    _table(lines, "By section", "Section", stats.by_section)
+    _table(lines, "By last edit year", "Year", stats.lastedit_years, sorted(stats.lastedit_years))
+    return "\n".join(lines)
+
+
+def render_proving(rows: Sequence[Sequence[Any]]) -> str:
+    lines = [
+        "# Proving batch: listings per city",
+        "",
+        "| City | Own page | From districts | Total |",
+        "|---|---|---|---|",
+    ]
+    for row in rows:
+        if len(row) == 2:
+            lines.append(f"| {row[0]} | {row[1]} | | |")
+        else:
+            lines.append(f"| {row[0]} | {row[1]} | {row[2]} | {row[1] + row[2]} |")
+    return "\n".join(lines) + "\n"

@@ -8,8 +8,11 @@ unclear is flagged with a short reason code and left empty, never guessed.
 import bz2
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from catalogue.errors import PipelineError
 
 STATUSES = ("outline", "usable", "guide", "star")
 # The types seen in the 2026-11-01 dump. An unknown suffix is ignored, so an unrelated template
@@ -96,9 +99,29 @@ def _text(page: ET.Element, path: str) -> str:
     return (element.text or "") if element is not None else ""
 
 
-def parse_dump(path: Path) -> ParsedDump:
-    articles: dict[str, Article] = {}
-    redirects: dict[str, str] = {}
+def _number(page: ET.Element, path: str) -> int:
+    """A page or revision ID. The message never quotes the page, so public logs stay clean."""
+    try:
+        return int(_text(page, path))
+    except ValueError:
+        raise PipelineError(
+            "the dump has a page with a missing or malformed page or revision ID"
+        ) from None
+
+
+@dataclass(frozen=True, slots=True)
+class DumpPage:
+    """One article page (namespace 0, not a redirect) as it stands in the dump."""
+
+    page_id: int
+    title: str
+    revision_id: int
+    timestamp: str
+    text: str
+
+
+def _stream_pages(path: Path) -> Iterator[ET.Element]:
+    """Yield each namespace-0 page element; the caller must finish with it before the next."""
     with bz2.open(path, "rb") as stream:
         # S314: the file is the Wikimedia dump, already checked against its published SHA-1.
         # defusedxml would be a new dependency, which needs the owner's approval first.
@@ -106,13 +129,34 @@ def parse_dump(path: Path) -> ParsedDump:
             if element.tag.rsplit("}", 1)[-1] != "page":
                 continue
             if _text(element, "{*}ns") == "0":
-                title = normalize_title(_text(element, "{*}title"))
-                redirect = element.find("{*}redirect")
-                if redirect is not None:
-                    redirects[title] = normalize_title(redirect.get("title", ""))
-                else:
-                    articles[title] = _article(element, title)
+                yield element
             element.clear()
+
+
+def iter_pages(path: Path) -> Iterator[DumpPage]:
+    """Stream the article pages in dump order (redirects and other namespaces are skipped)."""
+    for element in _stream_pages(path):
+        if element.find("{*}redirect") is not None:
+            continue
+        yield DumpPage(
+            page_id=_number(element, "{*}id"),
+            title=normalize_title(_text(element, "{*}title")),
+            revision_id=_number(element, "{*}revision/{*}id"),
+            timestamp=_text(element, "{*}revision/{*}timestamp"),
+            text=_text(element, "{*}revision/{*}text"),
+        )
+
+
+def parse_dump(path: Path) -> ParsedDump:
+    articles: dict[str, Article] = {}
+    redirects: dict[str, str] = {}
+    for element in _stream_pages(path):
+        title = normalize_title(_text(element, "{*}title"))
+        redirect = element.find("{*}redirect")
+        if redirect is not None:
+            redirects[title] = normalize_title(redirect.get("title", ""))
+        else:
+            articles[title] = _article(element, title)
     return ParsedDump(articles=articles, redirects=redirects)
 
 
@@ -122,9 +166,9 @@ def _article(page: ET.Element, title: str) -> Article:
     parent, parent_problem = extract_parent(text)
     problems = tuple(p for p in (status_problem, parent_problem) if p)
     return Article(
-        page_id=int(_text(page, "{*}id")),
+        page_id=_number(page, "{*}id"),
         title=title,
-        revision_id=int(_text(page, "{*}revision/{*}id")),
+        revision_id=_number(page, "{*}revision/{*}id"),
         timestamp=_text(page, "{*}revision/{*}timestamp"),
         type=kind,
         status=status,

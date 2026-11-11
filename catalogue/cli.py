@@ -1,7 +1,7 @@
 """Command line: `python -m catalogue <command>`.
 
-Commands: version, check, and the jobs as they are built (discover in B2; fetch-listings and the
-rest arrive one by one in later sessions).
+Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3;
+the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -16,12 +16,13 @@ import psycopg
 
 from catalogue import __version__
 from catalogue.db import connect, tls_in_use
-from catalogue.discover.dump import fetch_dump
+from catalogue.discover.dump import dump_filename, fetch_dump
 from catalogue.discover.overrides import load_country_iso_overrides
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
+from catalogue.listings.run import run_fetch_listings
 from catalogue.settings import Settings, SettingsError, load_settings
 
 SITEINFO_URL = "https://en.wikivoyage.org/w/api.php"
@@ -62,6 +63,33 @@ def _parser() -> argparse.ArgumentParser:
         "--init-registry",
         action="store_true",
         help="allow a missing slug registry (a genuine first run only)",
+    )
+
+    fetch = commands.add_parser(
+        "fetch-listings",
+        help="collect every listing and section text from the dump (offline, no settings needed)",
+    )
+    fetch.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    fetch.add_argument("--country", help="only this ISO country code (for testing)")
+    fetch.add_argument(
+        "--detail", action="append", default=[], metavar="CC", help="write a detail report for CC"
+    )
+    fetch.add_argument(
+        "--proving-file",
+        type=Path,
+        default=Path("config/proving_batch.txt"),
+        help="city titles to show in proving-batch.md",
+    )
+    fetch.add_argument("--dumps-dir", type=Path, default=Path("dumps"))
+    fetch.add_argument(
+        "--discover-dir", type=Path, default=Path("out/discover"), help="where discover wrote"
+    )
+    fetch.add_argument("--out-dir", type=Path, default=Path("out/listings"))
+    fetch.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="folder with the committed slug registry, slugs.json",
     )
 
     report = commands.add_parser(
@@ -150,6 +178,30 @@ def _discover(
     print(f"files: {result.output_dir}")
 
 
+def _fetch_listings(args: argparse.Namespace) -> None:
+    registry_path = args.data_dir / "slugs.json"
+    if not registry_path.is_file():
+        raise PipelineError(
+            f"the slug registry {registry_path} does not exist; run from the repository folder "
+            "or fix --data-dir"
+        )
+    proving = read_highlights(args.proving_file)
+    result = run_fetch_listings(
+        dump_path=args.dumps_dir / args.dump_date / dump_filename(args.dump_date),
+        dump_date=args.dump_date,
+        discover_folder=args.discover_dir / args.dump_date,
+        out_dir=args.out_dir,
+        registry_path=registry_path,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+        detail_countries=args.detail,
+        proving_titles=proving,
+    )
+    print(f"dump {args.dump_date}: matches the discover run")
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _wikivoyage_sitename(client: PoliteClient) -> str:
     response = client.get(SITEINFO_URL, params=SITEINFO_PARAMS)
     try:
@@ -203,6 +255,8 @@ def main(
             _discover(args, environ, env_file, client_factory)
         elif args.command == "report":
             _report(args)
+        elif args.command == "fetch-listings":
+            _fetch_listings(args)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:
