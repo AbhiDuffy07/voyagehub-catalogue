@@ -7,6 +7,7 @@ from catalogue.discover.parse import (
     normalize_title,
     parse_dump,
 )
+from catalogue.errors import PipelineError
 from tests.dumpfixture import page, write_dump
 
 
@@ -150,3 +151,15 @@ def test_iter_pages_yields_articles_in_dump_order_with_text_and_skips_the_rest(t
         ("Alpha page", 3, 30, "text a"),
     ]
     assert pages[0].timestamp == "2026-10-02T00:00:00Z"
+
+
+def test_a_page_without_a_revision_is_a_clear_error_that_quotes_nothing(tmp_path):
+    broken = "<page><title>Secret title</title><ns>0</ns><id>5</id></page>"
+    dump = write_dump(tmp_path / "d.xml.bz2", [broken])
+
+    with pytest.raises(PipelineError) as caught:
+        list(iter_pages(dump))
+    with pytest.raises(PipelineError):
+        parse_dump(dump)
+
+    assert "Secret title" not in str(caught.value)

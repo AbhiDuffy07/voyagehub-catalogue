@@ -53,6 +53,7 @@ ARTICLES = [
         "destination_outline",
     ),
     article(6, "Orphan", "district", "usable", ["Gone", "India"], "India", "IN", "destination"),
+    article(20, "Bhutan", "country", "guide", [], "Bhutan", "BT", "browse"),
     article(10, "Nepal", "country", "guide", [], "Nepal", "NP", "browse"),
     article(11, "Pokhara", "city", "usable", ["Nepal"], "Nepal", "NP", "destination"),
     article(12, "Tea tour", "itinerary", "usable", [], None, None, "later_wave"),
@@ -383,3 +384,40 @@ def test_a_page_that_fails_to_parse_is_counted_and_listed_and_the_run_goes_on(wo
     assert {r["name"] for r in listings(result)} >= {"Cafe", "Paddle"}
     assert "Lost" not in {r["name"] for r in listings(result)}
     assert "pages that failed to parse: 1" in result.summary()
+
+
+def test_an_unknown_detail_country_is_refused_before_anything_is_written(world):
+    with pytest.raises(PipelineError, match="XX"):
+        run(world, detail_countries=["xx"])
+
+    assert not (world["tmp"] / "out").exists()
+
+
+def test_a_known_country_with_no_listings_still_gets_a_detail_report(world):
+    result = run(world, detail_countries=["bt"])
+
+    text = (result.output_dir / "detail-BT.md").read_text(encoding="utf-8")
+    assert "Bhutan (BT)" in text
+    assert "0 listings" in text
+    assert (result.output_dir / "manifest.json").is_file()
+
+
+def test_a_page_that_breaks_while_its_rows_are_built_leaves_no_partial_rows(world):
+    path = world["discover"] / "articles.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for row in rows:
+        if row["title"] == "Kochi":
+            del row["role"]  # a damaged article row: fails after the page was parsed
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    manifest = world["discover"] / "manifest.json"  # the dump itself is unchanged
+
+    result = run(world)
+
+    assert manifest.is_file()
+    assert result.totals["pages_failed"] == 1
+    with (result.output_dir / "parse_failures.csv").open(encoding="utf-8", newline="") as handle:
+        (failure,) = list(csv.DictReader(handle))
+    assert (failure["title"], failure["error"]) == ("Kochi", "KeyError")
+    for name in ("listings", "sections", "markers"):
+        assert all(r["page_title"] != "Kochi" for r in jsonl(result.output_dir / f"{name}.jsonl"))
+    assert {"Beach", "Paddle"} <= {r["name"] for r in listings(result)}

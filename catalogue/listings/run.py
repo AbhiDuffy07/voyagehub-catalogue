@@ -16,15 +16,15 @@ from typing import Any
 
 from catalogue.discover.dump import sha1_of
 from catalogue.discover.output import _csv_text, write_manifest, write_text
-from catalogue.discover.parse import iter_pages
-from catalogue.discover.slugs import load_registry, slugify
+from catalogue.discover.parse import DumpPage, iter_pages
+from catalogue.discover.slugs import RegistryEntry, load_registry, slugify
 from catalogue.errors import PipelineError
 from catalogue.listings import report
 from catalogue.listings.keys import KeyInput, assign_keys
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
-from catalogue.listings.rollup import resolve_owner
+from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
-from catalogue.listings.wikitext import parse_page
+from catalogue.listings.wikitext import RawListing, parse_page
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +87,106 @@ class _Tally:
         return self.stats.setdefault(label, report.CountryStats(label, iso or ""))
 
 
+@dataclass(frozen=True, slots=True)
+class _PageRows:
+    """Everything one page contributes, built before any of it is written."""
+
+    sections: list[dict[str, Any]]
+    listings: list[dict[str, Any]]
+    markers: list[dict[str, Any]]
+    key_inputs: list[KeyInput]
+    counted: list[tuple[RawListing, str]]  # listing, the section it sits under
+    owner: Owner | None
+    region: str
+
+
+def _build_page(
+    dump_page: DumpPage,
+    row: dict[str, Any],
+    by_title: dict[str, dict[str, Any]],
+    slugs: dict[int, RegistryEntry],
+    dump_date: str,
+    read_at: str,
+) -> _PageRows:
+    content = parse_page(dump_page.text)
+    owner = resolve_owner(row, by_title)
+    slug = slugs[owner.page_id].slug if owner and owner.page_id in slugs else ""
+    page_fields = {
+        "page_id": dump_page.page_id,
+        "page_title": dump_page.title,
+        "page_type": row["type"],
+        "role": row["role"],
+        "country": row["tree_country"],
+        "country_iso": row["tree_country_iso"],
+    }
+    prov = provenance(dump_page, dump_date=dump_date, read_at=read_at)
+    ancestors = row["ancestors"]
+    built = _PageRows(
+        [],
+        [],
+        [],
+        [],
+        [],
+        owner,
+        ancestors[-2] if len(ancestors) >= 2 else "(directly under the country)",
+    )
+    ordinal = 0
+    for number, section in enumerate(content.sections, start=1):
+        built.sections.append(
+            {
+                **page_fields,
+                **prov,
+                "section_heading": section.heading,
+                "section_key": section.key,
+                "standard": section.standard,
+                "kind": section.kind,
+                "text": section.text,
+                "listing_count": section.listing_count,
+                "ordinal": number,
+            }
+        )
+        for listing in section.listings:
+            ordinal += 1
+            fields = listing.fields
+            base = f"{listing.kind}:{slugify(fields['name']) or 'unnamed'}"
+            built.key_inputs.append(
+                KeyInput(
+                    scope=owner.page_id if owner else dump_page.page_id,
+                    base=base,
+                    page_id=dump_page.page_id,
+                    ordinal=ordinal,
+                    wikidata=fields["wikidata"],
+                    lat=fields["lat"],
+                    long=fields["long"],
+                    address=fields["address"],
+                )
+            )
+            built.listings.append(
+                {
+                    **page_fields,
+                    **prov,
+                    **fields,
+                    "kind": listing.kind,
+                    "listing_type": listing.listing_type,
+                    "extra": listing.extra,
+                    "repeated_params": list(listing.repeated_params),
+                    "section_key": section.key,
+                    "ordinal": ordinal,
+                    "listing_key": base,  # made unique when the files are finished
+                    "owner_page_id": owner.page_id if owner else None,
+                    "owner_title": owner.title if owner else "",
+                    "owner_type": owner.type if owner else None,
+                    "owner_status": owner.status if owner else None,
+                    "owner_slug": slug,
+                    "via_district": owner.via_district if owner else False,
+                }
+            )
+            built.counted.append((listing, section.key))
+    for number, marker in enumerate(content.markers, start=1):
+        built.markers.append({**page_fields, **prov, **marker, "ordinal": number})
+    return built
+
+
 def run_fetch_listings(
     *,
     dump_path: Path,
@@ -105,6 +205,14 @@ def run_fetch_listings(
     by_id, by_title = read_articles(articles_path)
     articles_sha256 = hashlib.sha256(articles_path.read_bytes()).hexdigest()
     slugs = load_registry(registry_path)
+    country_names = {
+        r["tree_country_iso"]: r["tree_country"]
+        for r in by_id.values()
+        if r["tree_country_iso"] and r["tree_country"]
+    }
+    for iso in detail_countries:
+        if iso.upper() not in country_names:
+            raise PipelineError(f"unknown country code {iso.upper()} for --detail; check the code")
 
     folder = f"{dump_date}-{country_filter}" if country_filter else dump_date
     target = out_dir / folder
@@ -124,84 +232,33 @@ def run_fetch_listings(
             if country_filter and row["tree_country_iso"] != country_filter:
                 continue
             try:
-                content = parse_page(dump_page.text)
+                built = _build_page(dump_page, row, by_title, slugs, dump_date, read_at)
             except Exception as exc:  # noqa: BLE001
                 # One unreadable page must not stop a world run. It is counted, listed by ID,
                 # title and error class (never the message, which could quote page text) in
-                # parse_failures.csv, and shown in the summary.
+                # parse_failures.csv, and shown in the summary. Nothing of the page is written.
                 tally.failures.append((dump_page.page_id, dump_page.title, type(exc).__name__))
                 continue
             tally.pages_read += 1
-            owner = resolve_owner(row, by_title)
-            slug = slugs[owner.page_id].slug if owner and owner.page_id in slugs else ""
-            page_fields = {
-                "page_id": dump_page.page_id,
-                "page_title": dump_page.title,
-                "page_type": row["type"],
-                "role": row["role"],
-                "country": row["tree_country"],
-                "country_iso": row["tree_country_iso"],
-            }
-            prov = provenance(dump_page, dump_date=dump_date, read_at=read_at)
-            ancestors = row["ancestors"]
-            region = ancestors[-2] if len(ancestors) >= 2 else "(directly under the country)"
             stats = tally.country(row["tree_country"], row["tree_country_iso"])
-            ordinal = 0
-
-            for number, section in enumerate(content.sections, start=1):
-                sections_out.add(
-                    {
-                        **page_fields,
-                        **prov,
-                        "section_heading": section.heading,
-                        "section_key": section.key,
-                        "standard": section.standard,
-                        "kind": section.kind,
-                        "text": section.text,
-                        "listing_count": section.listing_count,
-                        "ordinal": number,
-                    }
+            for section_row in built.sections:
+                sections_out.add(section_row)
+            for listing_row in built.listings:
+                listings_out.add(listing_row)
+            for marker_row in built.markers:
+                markers_out.add(marker_row)
+            tally.key_inputs.extend(built.key_inputs)
+            for listing, section_key in built.counted:
+                _count(
+                    tally,
+                    stats,
+                    listing,
+                    section_key,
+                    built.region,
+                    built.owner,
+                    row["role"],
+                    today,
                 )
-                for listing in section.listings:
-                    ordinal += 1
-                    base = f"{listing.kind}:{slugify(listing.fields['name']) or 'unnamed'}"
-                    fields = listing.fields
-                    tally.key_inputs.append(
-                        KeyInput(
-                            scope=owner.page_id if owner else dump_page.page_id,
-                            base=base,
-                            page_id=dump_page.page_id,
-                            ordinal=ordinal,
-                            wikidata=fields["wikidata"],
-                            lat=fields["lat"],
-                            long=fields["long"],
-                            address=fields["address"],
-                        )
-                    )
-                    listings_out.add(
-                        {
-                            **page_fields,
-                            **prov,
-                            **listing.fields,
-                            "kind": listing.kind,
-                            "listing_type": listing.listing_type,
-                            "extra": listing.extra,
-                            "repeated_params": list(listing.repeated_params),
-                            "section_key": section.key,
-                            "ordinal": ordinal,
-                            "listing_key": base,  # made unique when the files are finished
-                            "owner_page_id": owner.page_id if owner else None,
-                            "owner_title": owner.title if owner else "",
-                            "owner_type": owner.type if owner else None,
-                            "owner_status": owner.status if owner else None,
-                            "owner_slug": slug,
-                            "via_district": owner.via_district if owner else False,
-                        }
-                    )
-                    _count(tally, stats, listing, section.key, region, owner, row["role"], today)
-
-            for number, marker in enumerate(content.markers, start=1):
-                markers_out.add({**page_fields, **prov, **marker, "ordinal": number})
 
         keys = assign_keys(tally.key_inputs)
         listings_out.finish(
@@ -230,6 +287,7 @@ def run_fetch_listings(
         by_title,
         country_filter,
         detail_countries,
+        country_names,
         proving_titles,
         dump_date,
     )
@@ -284,6 +342,7 @@ def _write_reports(
     by_title: dict[str, dict[str, Any]],
     country_filter: str | None,
     detail_countries: Sequence[str],
+    country_names: dict[str, str],
     proving_titles: Sequence[str],
     dump_date: str,
 ) -> None:
@@ -302,9 +361,11 @@ def _write_reports(
     write_text(target / "report.md", text)
 
     for iso in detail_countries:
-        match = next((s for s in tally.stats.values() if s.iso == iso.upper()), None)
-        if match is None:
-            raise PipelineError(f"no listings found for country {iso.upper()}; check the code")
+        # The code was checked at the start, so a country with no listings gets an empty report.
+        match = next(
+            (s for s in tally.stats.values() if s.iso == iso.upper()),
+            report.CountryStats(country_names[iso.upper()], iso.upper()),
+        )
         detail = report.render_detail(iso.upper(), match, dump_date=dump_date)
         write_text(target / f"detail-{iso.upper()}.md", detail)
 

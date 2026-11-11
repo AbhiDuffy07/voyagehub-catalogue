@@ -173,7 +173,8 @@ def _plain_text(code: Wikicode) -> str:
     """Plain text: links reduced to their text, listings and other templates gone, references,
     categories and files removed. Bullets become lines and sub-headings stay as lines."""
     for tag in [t for t in code.filter_tags() if str(t.tag).strip().lower() in _INVISIBLE_TAGS]:
-        code.remove(tag)
+        if code.contains(tag):  # a tag nested in a removed tag is already gone
+            code.remove(tag)
     for link in [
         link
         for link in code.filter_wikilinks()

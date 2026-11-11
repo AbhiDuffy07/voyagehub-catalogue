@@ -96,3 +96,9 @@ def test_a_file_or_category_link_inside_another_removed_link_does_not_crash():
 
     assert sections(nested_file)["a"].text == "Kept text"
     assert sections(nested_category)["a"].text == "Kept text"
+
+
+def test_an_invisible_tag_inside_another_invisible_tag_does_not_crash():
+    text = "== A ==\n<ref>outer <ref>inner</ref></ref>\nKept text"
+
+    assert sections(text)["a"].text == "Kept text"
