@@ -23,6 +23,7 @@ from catalogue.listings import report
 from catalogue.listings.interpret import Interpreted, interpret
 from catalogue.listings.keys import KEY_VERSION, KeyInput, assign_keys, key_slug
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
+from catalogue.listings.quality import distance_km, parse_coordinate
 from catalogue.listings.reference import Reference, load_reference
 from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
@@ -133,7 +134,10 @@ def _build_page(
         "role": row["role"],
         "country": row["tree_country"],
         "country_iso": row["tree_country_iso"],
+        "page_lat": content.geo[0] if content.geo else "",
+        "page_long": content.geo[1] if content.geo else "",
     }
+    page_point = parse_coordinate(*content.geo) if content.geo else None
     prov = provenance(dump_page, dump_date=dump_date, read_at=read_at)
     ancestors = row["ancestors"]
     built = _PageRows(
@@ -177,6 +181,8 @@ def _build_page(
             read = interpret(
                 fields, country_iso=row["tree_country_iso"], reference=reference, dump_day=dump_day
             )
+            point = parse_coordinate(fields["lat"], fields["long"])
+            distance = round(distance_km(page_point, point), 3) if page_point and point else None
             base = f"{listing.kind}:{key_slug(fields['name'])}"
             built.key_inputs.append(
                 KeyInput(
@@ -196,6 +202,7 @@ def _build_page(
                     **prov,
                     **fields,
                     **read.fields,
+                    "coord_distance_km": distance,
                     "kind": listing.kind,
                     "listing_type": listing.listing_type,
                     "extra": listing.extra,
@@ -295,6 +302,11 @@ def run_fetch_listings(
                 )
             for listing_row in built.listings:
                 _sample_price(tally, listing_row)
+                if listing_row["coord_distance_km"] is not None:
+                    page_type = listing_row["page_type"] or report.NO_TYPE
+                    stats.distances.setdefault(page_type, []).append(
+                        listing_row["coord_distance_km"]
+                    )
 
         keys = assign_keys(tally.key_inputs)
         listings_out.finish(

@@ -250,3 +250,37 @@ def test_the_reports_show_the_freshness_numbers_for_the_two_year_decision(tmp_pa
         assert "| undated (missing, unreadable or implausible) | 1 |" in text
         assert "## Hours: how old is the last edit" in text
     assert "| unclear (the year straddles the cutoff) | 0 |" in india
+
+
+# --- distance from the page's own geo ---------------------------------------------------------
+
+GEO_PAGES = [
+    page(
+        "Kochi",
+        "{{geo|9.9312|76.2673}}\n== See ==\n{{see|name=Near|lat=9.9400|long=76.2700}}\n"
+        "{{see|name=Far|lat=10.5|long=77.1}}\n{{see|name=NoCoords}}\n{{see|name=Bad|lat=x|long=y}}",
+        page_id=3,
+    ),
+    page("Fort Kochi", "== See ==\n{{see|name=NoPageGeo|lat=9.96|long=76.24}}", page_id=4),
+]
+
+
+def test_each_listing_carries_the_pages_geo_and_its_distance_from_it(tmp_path):
+    result = build(tmp_path, GEO_PAGES)
+    row = by_name(result)
+
+    assert (row["Near"]["page_lat"], row["Near"]["page_long"]) == ("9.9312", "76.2673")
+    assert 0.5 < row["Near"]["coord_distance_km"] < 1.5
+    assert 100 < row["Far"]["coord_distance_km"] < 150
+    for name in ("NoCoords", "Bad", "NoPageGeo"):
+        assert row[name]["coord_distance_km"] is None, name
+    assert (row["NoPageGeo"]["page_lat"], row["NoPageGeo"]["page_long"]) == ("", "")
+
+
+def test_the_reports_show_distance_percentiles_by_page_type(tmp_path):
+    result = build(tmp_path, GEO_PAGES, detail_countries=["IN"])
+
+    for name in ("report.md", "detail-IN.md"):
+        text = (result.output_dir / name).read_text(encoding="utf-8")
+        assert "## Distance from the page's own geo, by page type" in text
+        assert "| city | 2 |" in text

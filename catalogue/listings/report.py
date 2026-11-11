@@ -1,5 +1,6 @@
 """Counts and Markdown reports for `fetch-listings`. Counts and titles only, never listing text."""
 
+import math
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -7,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 NO_COUNTRY = "(no country)"
+NO_TYPE = "(no type)"
 KIND_ORDER = ("see", "do", "buy", "eat", "drink", "sleep", "go", "listing")
 _YEAR = re.compile(r"^(\d{4})")
 
@@ -25,6 +27,7 @@ class CountryStats:
     hours_status: Counter[str] = field(default_factory=Counter)
     price_age: Counter[str] = field(default_factory=Counter)
     hours_age: Counter[str] = field(default_factory=Counter)
+    distances: dict[str, list[float]] = field(default_factory=dict)  # page type -> km
     own: int = 0
     from_districts: int = 0
     owner_unresolved: int = 0
@@ -68,6 +71,34 @@ def counts_by_country_rows(stats: Mapping[str, CountryStats]) -> tuple[list[str]
         for s in ordered
     ]
     return header, rows
+
+
+def percentile(values: Sequence[float], p: float) -> float:
+    """Nearest-rank percentile of a non-empty list (stable, no interpolation)."""
+    ordered = sorted(values)
+    rank = max(1, math.ceil(p / 100 * len(ordered)))
+    return ordered[rank - 1]
+
+
+def distance_lines(by_type: Mapping[str, Sequence[float]]) -> list[str]:
+    """How far listings are from their page's own geo, per page type. The thresholds of
+    `config/listing_quality.toml` are set from this table, so the reasons can be checked."""
+    lines = [
+        "## Distance from the page's own geo, by page type",
+        "",
+        "Kilometres, nearest-rank percentiles, listings with usable coordinates on a page with "
+        "a usable `{{geo}}`.",
+        "",
+        "| Page type | Listings | p50 | p90 | p95 | p99 | p99.9 | max |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for page_type in sorted(by_type, key=lambda k: (k == NO_TYPE, k)):
+        values = by_type[page_type]
+        if not values:
+            continue
+        cells = " | ".join(f"{percentile(values, q):.1f}" for q in (50, 90, 95, 99, 99.9, 100))
+        lines.append(f"| {page_type} | {len(values)} | {cells} |")
+    return [*lines, ""]
 
 
 AGE_LABELS = (
@@ -139,6 +170,11 @@ def render_report(
     lines += freshness_lines(
         totals["price_age"], totals["hours_age"], totals["price_status"], totals["hours_status"]
     )
+    merged: dict[str, list[float]] = {}
+    for country in stats.values():
+        for page_type, values in country.distances.items():
+            merged.setdefault(page_type, []).extend(values)
+    lines += distance_lines(merged)
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -172,6 +208,7 @@ def render_detail(iso: str, stats: CountryStats, *, dump_date: str) -> str:
     lines += freshness_lines(
         stats.price_age, stats.hours_age, stats.price_status, stats.hours_status
     )
+    lines += distance_lines(stats.distances)
     return "\n".join(lines)
 
 

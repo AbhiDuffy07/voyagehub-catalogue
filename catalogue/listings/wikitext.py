@@ -114,6 +114,7 @@ class Section:
 class PageContent:
     sections: list[Section]
     markers: list[dict[str, str]]
+    geo: tuple[str, str] | None = None  # the page's own {{geo}}: (lat, long) as written, or None
 
 
 def section_key(heading: str) -> str:
@@ -223,6 +224,17 @@ def _build_section(
     return Section(heading, key, key in STANDARD_SECTIONS, kind, text, listings, own_markers)
 
 
+def _page_geo(nodes: list) -> tuple[str, str] | None:
+    """The first {{geo|lat|long}}: positional values 1 and 2 (a third is the zoom), or named."""
+    for node in nodes:
+        if isinstance(node, Template) and _template_name(node) == "geo":
+            named = {str(p.name).strip().lower(): str(p.value).strip() for p in node.params}
+            lat = named.get("lat", named.get("1", ""))
+            long = named.get("long", named.get("2", ""))
+            return lat, long
+    return None
+
+
 def parse_page(text: str) -> PageContent:
     """Split at level-2 headings; the text before the first one is the lead."""
     nodes = mwparserfromhell.parse(text).nodes
@@ -241,4 +253,4 @@ def parse_page(text: str) -> PageContent:
     section = _build_section(heading, current, markers)
     if section is not None:
         sections.append(section)
-    return PageContent(sections, markers)
+    return PageContent(sections, markers, _page_geo(nodes))
