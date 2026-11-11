@@ -3,6 +3,7 @@ import pytest
 from catalogue.discover.parse import (
     classify,
     extract_parent,
+    iter_pages,
     normalize_title,
     parse_dump,
 )
@@ -129,3 +130,23 @@ def test_a_page_with_empty_text_is_kept_without_facts(tmp_path):
     empty = parse_dump(dump).articles["Empty"]
 
     assert (empty.type, empty.status, empty.parent) == (None, None, None)
+
+
+def test_iter_pages_yields_articles_in_dump_order_with_text_and_skips_the_rest(tmp_path):
+    dump = write_dump(
+        tmp_path / "d.xml.bz2",
+        [
+            page("Zed", "text z", page_id=7, revision=70, ts="2026-10-02T00:00:00Z"),
+            page("Bombay", page_id=2, redirect="Mumbai"),
+            page("Talk:Zed", "x", page_id=8, ns=1),
+            page("Alpha_page", "text a", page_id=3, revision=30),
+        ],
+    )
+
+    pages = list(iter_pages(dump))
+
+    assert [(p.title, p.page_id, p.revision_id, p.text) for p in pages] == [
+        ("Zed", 7, 70, "text z"),
+        ("Alpha page", 3, 30, "text a"),
+    ]
+    assert pages[0].timestamp == "2026-10-02T00:00:00Z"
