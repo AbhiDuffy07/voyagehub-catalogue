@@ -47,6 +47,15 @@ Offline: no network, no database, no settings. It reads the dump again and keeps
 
 Settings come from environment variables (names only in [.env.example](.env.example)); a local `.env` file is read when present. Nothing secret is ever committed.
 
+## Known follow-ups
+
+Small items found in review of `fetch-listings`, not yet done:
+
+- **Memory:** every listing's key inputs are kept in memory until the files are finished. The world run (463K listings) held about 430 MB, so this is fine today; compute keys from the spool file if it ever grows.
+- **Reads:** `articles.jsonl` is read twice (parsed, then hashed). Hash it in chunks or in the same pass.
+- **Region label in the detail report:** it assumes `discover` lists ancestors nearest first and does not check it; a country page's own listings also get the label "(directly under the country)".
+- **Listing keys for non-Latin names (planned for B3b):** keys are ASCII-folded today, so names in other scripts become `kind:unnamed` and rely on their Wikidata, coordinate or address label. B3b will count the affected listings per country and then keep Unicode letters and digits, normalised (NFKC) and case-folded, in the key, with a `key_version` field. This must be settled before B15 loads any key.
+
 ## Politeness towards Wikimedia
 
 Every request carries a descriptive User-Agent with a contact address, at most 3 requests run at once, at most 200 a minute, and `Retry-After` is respected. See Wikimedia's [User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy).
