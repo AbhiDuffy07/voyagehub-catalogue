@@ -78,9 +78,8 @@ PAGES = [
 ]
 
 
-@pytest.fixture
-def world(tmp_path):
-    dump = write_dump(tmp_path / "dump.xml.bz2", PAGES)
+def make_world(tmp_path, pages):
+    dump = write_dump(tmp_path / "dump.xml.bz2", pages)
     discover = tmp_path / "discover" / "20261101"
     discover.mkdir(parents=True)
     rows = sorted(ARTICLES, key=lambda r: r["wikivoyage_page_id"])
@@ -93,6 +92,11 @@ def world(tmp_path):
         registry, {3: RegistryEntry("kochi", "Kochi"), 11: RegistryEntry("pokhara", "Pokhara")}
     )
     return {"dump": dump, "discover": discover, "registry": registry, "tmp": tmp_path}
+
+
+@pytest.fixture
+def world(tmp_path):
+    return make_world(tmp_path, PAGES)
 
 
 def run(world, **kwargs):
@@ -197,11 +201,12 @@ def test_a_listing_with_a_broken_parent_chain_has_no_owner_and_is_counted(world)
     assert result.totals["owner_unresolved"] == 1
 
 
-def test_a_repeated_listing_name_on_one_owner_gets_a_numbered_key(world):
+def test_a_repeated_listing_name_on_one_owner_gets_distinct_keys(world):
     result = run(world)
 
     keys = [r["listing_key"] for r in listings(result) if r["name"] == "Dutch Palace"]
-    assert keys == ["see:dutch-palace", "see:dutch-palace-2"]
+    assert len(set(keys)) == 2
+    assert all(k.startswith("see:dutch-palace~") for k in keys)
 
 
 def test_listings_on_every_article_are_collected_including_itineraries(world):
@@ -331,3 +336,26 @@ def test_a_missing_dump_is_refused(world):
 
     with pytest.raises(PipelineError, match="dump"):
         run(world)
+
+
+def test_every_output_file_is_sorted_by_page_id_then_position(world):
+    result = run(world)
+
+    for name, position in (
+        ("listings", "ordinal"),
+        ("sections", "ordinal"),
+        ("markers", "ordinal"),
+    ):
+        rows = jsonl(result.output_dir / f"{name}.jsonl")
+        order = [(r["page_id"], r[position]) for r in rows]
+        assert order == sorted(order), name
+
+
+def test_output_and_keys_do_not_depend_on_the_order_of_pages_in_the_dump(world, tmp_path_factory):
+    other = make_world(tmp_path_factory.mktemp("reversed"), list(reversed(PAGES)))
+
+    first = run(world)
+    second = run(other)
+
+    for name in ("listings.jsonl", "sections.jsonl", "markers.jsonl", "counts_by_country.csv"):
+        assert (first.output_dir / name).read_bytes() == (second.output_dir / name).read_bytes()

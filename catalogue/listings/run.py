@@ -20,7 +20,8 @@ from catalogue.discover.parse import iter_pages
 from catalogue.discover.slugs import load_registry, slugify
 from catalogue.errors import PipelineError
 from catalogue.listings import report
-from catalogue.listings.output import SCHEMA_VERSION, JsonlWriter, provenance
+from catalogue.listings.keys import KeyInput, assign_keys
+from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
 from catalogue.listings.rollup import resolve_owner
 from catalogue.listings.source import read_articles
 from catalogue.listings.wikitext import parse_page
@@ -71,7 +72,7 @@ class _Tally:
     def __init__(self) -> None:
         self.stats: dict[str, report.CountryStats] = {}
         self.owner_counts: dict[int, dict[str, int]] = {}
-        self.key_seen: Counter[tuple[int, str]] = Counter()
+        self.key_inputs: list[KeyInput] = []
         self.by_kind: Counter[str] = Counter()
         self.by_role: Counter[str] = Counter()
         self.pages_read = 0
@@ -109,9 +110,9 @@ def run_fetch_listings(
     tally = _Tally()
 
     with (
-        JsonlWriter(target / "listings.jsonl") as listings_out,
-        JsonlWriter(target / "sections.jsonl") as sections_out,
-        JsonlWriter(target / "markers.jsonl") as markers_out,
+        SortedJsonl(target / "listings.jsonl") as listings_out,
+        SortedJsonl(target / "sections.jsonl") as sections_out,
+        SortedJsonl(target / "markers.jsonl") as markers_out,
     ):
         for dump_page in iter_pages(dump_path):
             row = by_id.get(dump_page.page_id)
@@ -139,7 +140,7 @@ def run_fetch_listings(
             ordinal = 0
 
             for number, section in enumerate(content.sections, start=1):
-                sections_out.write(
+                sections_out.add(
                     {
                         **page_fields,
                         **prov,
@@ -155,10 +156,20 @@ def run_fetch_listings(
                 for listing in section.listings:
                     ordinal += 1
                     base = f"{listing.kind}:{slugify(listing.fields['name']) or 'unnamed'}"
-                    scope = owner.page_id if owner else dump_page.page_id
-                    tally.key_seen[(scope, base)] += 1
-                    repeat = tally.key_seen[(scope, base)]
-                    listings_out.write(
+                    fields = listing.fields
+                    tally.key_inputs.append(
+                        KeyInput(
+                            scope=owner.page_id if owner else dump_page.page_id,
+                            base=base,
+                            page_id=dump_page.page_id,
+                            ordinal=ordinal,
+                            wikidata=fields["wikidata"],
+                            lat=fields["lat"],
+                            long=fields["long"],
+                            address=fields["address"],
+                        )
+                    )
+                    listings_out.add(
                         {
                             **page_fields,
                             **prov,
@@ -169,7 +180,7 @@ def run_fetch_listings(
                             "repeated_params": list(listing.repeated_params),
                             "section_key": section.key,
                             "ordinal": ordinal,
-                            "listing_key": base if repeat == 1 else f"{base}-{repeat}",
+                            "listing_key": base,  # made unique when the files are finished
                             "owner_page_id": owner.page_id if owner else None,
                             "owner_title": owner.title if owner else "",
                             "owner_type": owner.type if owner else None,
@@ -180,8 +191,15 @@ def run_fetch_listings(
                     )
                     _count(tally, stats, listing, section.key, region, owner, row["role"], today)
 
-            for marker in content.markers:
-                markers_out.write({**page_fields, **prov, **marker})
+            for number, marker in enumerate(content.markers, start=1):
+                markers_out.add({**page_fields, **prov, **marker, "ordinal": number})
+
+        keys = assign_keys(tally.key_inputs)
+        listings_out.finish(
+            lambda r: {**r, "listing_key": keys[(r["page_id"], r["ordinal"])]},
+        )
+        sections_out.finish()
+        markers_out.finish()
 
     totals = {
         "pages_read": tally.pages_read,
