@@ -359,3 +359,27 @@ def test_output_and_keys_do_not_depend_on_the_order_of_pages_in_the_dump(world, 
 
     for name in ("listings.jsonl", "sections.jsonl", "markers.jsonl", "counts_by_country.csv"):
         assert (first.output_dir / name).read_bytes() == (second.output_dir / name).read_bytes()
+
+
+def test_a_page_that_fails_to_parse_is_counted_and_listed_and_the_run_goes_on(world, monkeypatch):
+    from catalogue.listings import run as run_module
+
+    real = run_module.parse_page
+
+    def flaky(text):
+        if "Lost" in text:
+            raise ValueError("SECRET-WIKITEXT")
+        return real(text)
+
+    monkeypatch.setattr(run_module, "parse_page", flaky)
+
+    result = run(world)
+
+    assert result.totals["pages_failed"] == 1
+    with (result.output_dir / "parse_failures.csv").open(encoding="utf-8", newline="") as handle:
+        (failure,) = list(csv.DictReader(handle))
+    assert (failure["page_id"], failure["title"], failure["error"]) == ("6", "Orphan", "ValueError")
+    assert "SECRET-WIKITEXT" not in (result.output_dir / "parse_failures.csv").read_text("utf-8")
+    assert {r["name"] for r in listings(result)} >= {"Cafe", "Paddle"}
+    assert "Lost" not in {r["name"] for r in listings(result)}
+    assert "pages that failed to parse: 1" in result.summary()

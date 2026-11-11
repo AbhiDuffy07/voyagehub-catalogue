@@ -39,6 +39,7 @@ class ListingsResult:
         return "\n".join(
             [
                 f"pages read: {totals['pages_read']}",
+                f"pages that failed to parse: {totals['pages_failed']}",
                 f"listings: {totals['listings']} ({kinds})",
                 f"  rolled up from districts: {totals['via_district']}, "
                 f"no owner: {totals['owner_unresolved']}",
@@ -73,6 +74,7 @@ class _Tally:
         self.stats: dict[str, report.CountryStats] = {}
         self.owner_counts: dict[int, dict[str, int]] = {}
         self.key_inputs: list[KeyInput] = []
+        self.failures: list[tuple[int, str, str]] = []
         self.by_kind: Counter[str] = Counter()
         self.by_role: Counter[str] = Counter()
         self.pages_read = 0
@@ -121,8 +123,15 @@ def run_fetch_listings(
                 continue
             if country_filter and row["tree_country_iso"] != country_filter:
                 continue
+            try:
+                content = parse_page(dump_page.text)
+            except Exception as exc:  # noqa: BLE001
+                # One unreadable page must not stop a world run. It is counted, listed by ID,
+                # title and error class (never the message, which could quote page text) in
+                # parse_failures.csv, and shown in the summary.
+                tally.failures.append((dump_page.page_id, dump_page.title, type(exc).__name__))
+                continue
             tally.pages_read += 1
-            content = parse_page(dump_page.text)
             owner = resolve_owner(row, by_title)
             slug = slugs[owner.page_id].slug if owner and owner.page_id in slugs else ""
             page_fields = {
@@ -204,6 +213,7 @@ def run_fetch_listings(
     totals = {
         "pages_read": tally.pages_read,
         "pages_not_in_articles": tally.pages_not_in_articles,
+        "pages_failed": len(tally.failures),
         "listings": listings_out.count,
         "sections": sections_out.count,
         "markers": markers_out.count,
@@ -277,6 +287,8 @@ def _write_reports(
     proving_titles: Sequence[str],
     dump_date: str,
 ) -> None:
+    failures = sorted(tally.failures)
+    write_text(target / "parse_failures.csv", _csv_text(["page_id", "title", "error"], failures))
     header, rows = report.counts_by_country_rows(tally.stats)
     write_text(target / "counts_by_country.csv", _csv_text(header, rows))
     by_type_rows = [[k, totals["by_kind"].get(k, 0)] for k in report.KIND_ORDER]

@@ -88,3 +88,11 @@ def test_heading_with_formatting_is_reduced_to_its_text():
     (section,) = parse_page("== ''See'' and [[Do]] ==\nx").sections
 
     assert section.heading == "See and Do"
+
+
+def test_a_file_or_category_link_inside_another_removed_link_does_not_crash():
+    nested_file = "== A ==\n[[File:A.jpg|thumb|see [[File:B.svg|20px]] here]]\nKept text"
+    nested_category = "== A ==\n[[File:A.jpg|[[Category:X]]]] Kept text"
+
+    assert sections(nested_file)["a"].text == "Kept text"
+    assert sections(nested_category)["a"].text == "Kept text"

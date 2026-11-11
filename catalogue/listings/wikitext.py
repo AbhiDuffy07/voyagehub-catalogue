@@ -179,7 +179,9 @@ def _plain_text(code: Wikicode) -> str:
         for link in code.filter_wikilinks()
         if str(link.title).strip().lower().startswith(_REMOVED_LINK_PREFIXES)
     ]:
-        code.remove(link)
+        # A link nested in another removed link (a file inside a file caption) is already gone.
+        if code.contains(link):
+            code.remove(link)
     stripped = code.strip_code(normalize=True, collapse=True)
     lines = [line.strip() for line in stripped.splitlines()]
     return _BLANK_RUNS.sub("\n\n", "\n".join(lines)).strip()
