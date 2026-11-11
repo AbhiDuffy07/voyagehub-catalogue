@@ -8,10 +8,12 @@
 # Every number below was read off the real distance percentiles of India (Wikivoyage dump
 # 20261101, 20,474 listings; the table is in report.md and detail-IN.md under "Distance from the
 # page's own geo, by page type"). Change a number only together with its reason, and bump
-# rules_version. The code has nothing country-specific in it; the world run's table is the check
-# that these values are not too tight for large countries.
+# rules_version. The code has nothing country-specific in it. The world run's table (same
+# report) is the check that a value is not too tight for large countries; version 2 raised the
+# park and rural-area limits after that check (park 60 km would have flagged 5.7% of the world's
+# park listings, rural area 100 km 1.2%).
 
-rules_version = 1
+rules_version = 2
 
 [coordinates.far_km.city]
 km = 100
@@ -26,16 +28,12 @@ reason = """India district pages: p95 12.5 km, p99 16.0 km. Only 7 of 1,985 list
 25 km, and 2 above 50 km, so 30 km leaves the normal spread alone and catches the outliers."""
 
 [coordinates.far_km.park]
-km = 60
-reason = """India park pages (226 listings): p95 32.3 km, then nothing between 50 km and 175 km; \
-the 9 listings above 50 km are all at least 175 km away (a temple and a dam far outside the \
-park). 60 km sits inside the gap."""
+km = 250
+reason = """India park pages (226 listings) were tidy: p95 32.3 km and nothing between 50 km and 175 km. The world is not: park pages (8,815 listings) have p90 39.9 km, p95 65.7 km and p99 169.8 km, because national parks are large, so 60 km would flag 5.7%. Above 250 km the count flattens (0.54% of listings, then 0.16% above 2,000 km), and what remains is wrong coordinates and far-off places. 250 km keeps the flag for those."""
 
 [coordinates.far_km.ruralarea]
-km = 100
-reason = """India rural-area pages (98 listings): p99 80.2 km and the largest is 80.2 km, so no \
-sample is above 100 km. Rural areas are wide, so the limit is kept loose until a bigger sample \
-(the world run) shows a better value."""
+km = 200
+reason = """India rural-area pages (98 listings): p99 80.2 km, nothing above 100 km. World rural areas (7,743 listings): p95 43.7 km, p99 113.4 km, 1.2% above 100 km. At 200 km 0.40% are flagged, the same rate as cities at 100 km, and the tail beyond it is wrong coordinates."""
 
 [coordinates.far_km.airport]
 km = 25
