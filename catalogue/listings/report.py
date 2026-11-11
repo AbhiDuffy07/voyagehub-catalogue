@@ -93,7 +93,7 @@ def freshness_lines(
     ):
         total = sum(ages.values())
         lines += [f"## {title}: how old is the last edit", ""]
-        lines += [f"Listings with a {title.lower()[:-1]} text: {total}.", ""]
+        lines += [f"Listings with {title.lower()} text: {total}.", ""]
         lines += ["| Last edit | Listings | Share |", "|---|---|---|"]
         for key, label in AGE_LABELS:
             count = ages.get(key, 0)

@@ -350,3 +350,51 @@ def test_text_without_digits_or_known_words_is_unparsed():
     result = price("ask at the gate")
 
     assert (result.status, result.entries) == ("unparsed", [])
+
+
+def test_masking_one_phrase_does_not_let_a_later_pattern_reach_across_it():
+    result = price("₹125 for 5 kg ice")
+
+    assert result.status == "parsed"
+    assert (result.entries[0]["amount_minor"], result.entries[0]["unit"]) == (12500, "for 5")
+
+
+def test_a_bracketed_label_right_after_an_amount_belongs_to_that_amount():
+    result = price("₹10 (Indians) ₹200 (Foreigners)")
+
+    assert result.status == "parsed"
+    assert [(e["audience"], e["amount_minor"]) for e in result.entries] == [
+        ("resident", 1000),
+        ("foreigner", 20000),
+    ]
+
+
+def test_a_full_stop_between_sentences_separates_labels():
+    result = price("Free Entry for Indians. For foreign tourist charged ₹50")
+
+    assert result.status == "parsed"
+    assert [(e["audience"], e["free"], e["amount_minor"]) for e in result.entries] == [
+        ("resident", True, 0),
+        ("foreigner", False, 5000),
+    ]
+
+
+def test_a_shared_symbol_in_a_range_follows_the_named_currency_in_the_same_range():
+    entry = one("US$40 - $100")
+
+    assert (entry["currency"], entry["amount_min_minor"], entry["amount_max_minor"]) == (
+        "USD",
+        4000,
+        10000,
+    )
+
+
+def test_between_x_and_y_is_a_range_not_two_prices():
+    entry = one("Ranging between ₹100 and ₹500 per person")
+
+    assert (entry["amount_min_minor"], entry["amount_max_minor"]) == (10000, 50000)
+    assert entry["unit"] == "per person"
+
+
+def test_and_without_between_still_separates_two_prices():
+    assert len(price("Adult ₹100 and child ₹50").entries) == 2

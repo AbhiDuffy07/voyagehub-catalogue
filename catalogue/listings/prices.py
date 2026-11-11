@@ -77,8 +77,10 @@ _SYMBOL_ALTERNATIVES = (
 _PREFIX = rf"(?:(?<![A-Za-z])(?:{_SYMBOL_ALTERNATIVES})|(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z]))"
 _NUMBER = r"\d+(?:[,.]\d+)*"
 _MONEY = re.compile(
-    rf"(?P<pre>{_PREFIX})?\s?(?P<a>{_NUMBER})"
-    rf"(?:(?:\s?[-–—]\s?|\s+to\s+)(?P<pre2>{_PREFIX})?\s?(?P<b>{_NUMBER}))?"
+    rf"(?P<between>(?i:\bbetween\s+))?(?P<pre>{_PREFIX})?\s?(?P<a>{_NUMBER})"
+    # `and` joins two amounts into a range only after `between`
+    rf"(?:(?:\s?[-–—]\s?|\s+to\s+|(?(between)\s+and\s+|(?!)))"
+    rf"(?P<pre2>{_PREFIX})?\s?(?P<b>{_NUMBER}))?"
     rf"(?:\s?(?P<post>(?<![A-Za-z])[A-Z]{{3}}(?![A-Za-z])|₹|€|(?i:kr)\b))?"
 )
 _FREE = re.compile(
@@ -125,7 +127,9 @@ _MASKS = (
     ("measure", r"\b\d+\s*(?:hours?|hrs?|minutes?|mins?|days?|nights?|km|kg|people|persons|pax)\b"),
 )
 _MASK_PATTERNS = tuple((kind, re.compile(pattern, re.IGNORECASE)) for kind, pattern in _MASKS)
-_SEPARATOR = re.compile(r"[,;\n]|&|\band\b", re.IGNORECASE)
+_SEPARATOR = re.compile(r"[,;\n]|&|\band\b|\.(?=\s)", re.IGNORECASE)
+_BRACKETED = re.compile(r"\s*\([^)]*\)")
+_GUARD = "\x00"  # fills a masked phrase while matching, so a later pattern cannot bridge it
 _WORD = re.compile(r"[^\W\d_]+")
 _AUDIENCE_WORDS = {
     "adult": "adult",
@@ -232,8 +236,8 @@ def _mask(text: str) -> tuple[str, list[tuple[int, int, str]]]:
             start, end = match.span()
             if kind == "unit":
                 units.append((start, end, _unit_text(text[start:end])))
-            chars[start:end] = " " * (end - start)
-    return "".join(chars), sorted(units)
+            chars[start:end] = _GUARD * (end - start)
+    return "".join(chars).replace(_GUARD, " "), sorted(units)
 
 
 def _unit_text(raw: str) -> str:
@@ -249,6 +253,22 @@ def _resolve(token: str, country_currency: str | None, known: set[str]) -> str |
     if key in _SHARED_SYMBOLS:
         return country_currency if country_currency in _SHARED_SYMBOLS[key] else None
     return token if token in known else None
+
+
+def _resolve_all(
+    tokens: list[str], country_currency: str | None, known: set[str]
+) -> set[str | None]:
+    """Resolve the currency tokens of one amount. A shared symbol (`$`) next to a named currency
+    that it can stand for (`US$40 - $100`) means that currency."""
+    resolved = [_resolve(t, country_currency, known) for t in tokens]
+    definite = {code for code in resolved if code}
+    if len(definite) == 1:
+        named = next(iter(definite))
+        resolved = [
+            code or (named if named in _SHARED_SYMBOLS.get(token.lower().rstrip("."), ()) else None)
+            for code, token in zip(resolved, tokens, strict=True)
+        ]
+    return set(resolved)
 
 
 def _minor(amount: Decimal, exponent: int | None) -> int | None:
@@ -352,7 +372,7 @@ def _fill_amounts(
     assert low is not None  # noqa: S101 (problem tokens never get here)
     country_info = reference.country_currency.get(country or "")
     country_code = country_info.code if country_info else None
-    codes = {_resolve(t, country_code, reference.known_codes) for t in token.currency_tokens}
+    codes = _resolve_all(token.currency_tokens, country_code, reference.known_codes)
     if token.currency_tokens:
         entry["currency_basis"] = "text"
         if len(codes) == 1 and None not in codes:
@@ -392,8 +412,14 @@ def _pieces(
     for i, token in enumerate(tokens):
         region_start = tokens[i - 1].end if i else 0
         region = view[region_start : token.start]
+        bracketed = _BRACKETED.match(region) if i else None
         separator = _SEPARATOR.search(region) if i else None
-        if separator:
+        if bracketed:
+            # `₹10 (Indians) ₹200 (Foreigners)`: a bracket right after an amount labels that amount.
+            before.append((region_start + bracketed.end(), token.start))
+            after[i - 1] = (after[i - 1][0], region_start + bracketed.end())
+            unclear.append(False)
+        elif separator:
             before.append((region_start + separator.end(), token.start))
             if i:
                 after[i - 1] = (after[i - 1][0], region_start + separator.start())
