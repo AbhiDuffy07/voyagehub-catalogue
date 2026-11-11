@@ -168,3 +168,10 @@ def test_a_page_without_a_geo_template_has_no_geo():
 
 def test_only_the_first_geo_template_counts():
     assert parse_page("{{geo|1|2}} and {{geo|3|4}}").geo == ("1", "2")
+
+
+def test_a_marker_in_a_lead_with_no_text_and_no_listings_is_kept():
+    page = parse_page("{{pagebanner}}{{marker|type=see|name=Lonely Fort|lat=1|long=2}}")
+
+    assert [m["name"] for m in page.markers] == ["Lonely Fort"]
+    assert [m["name"] for s in page.sections for m in s.markers] == ["Lonely Fort"]

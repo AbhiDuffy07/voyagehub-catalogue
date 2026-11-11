@@ -144,3 +144,9 @@ def test_the_cap_counts_characters_not_bytes():
 
 def test_key_version_is_two_because_the_ascii_keys_were_never_loaded():
     assert KEY_VERSION == 2
+
+
+def test_a_wikidata_id_with_a_zero_is_not_used_to_tell_listings_apart():
+    result = keys(item(3, 1, wikidata="Q0"), item(3, 2, wikidata="Q0"))
+
+    assert "Q0" not in "".join(result.values())

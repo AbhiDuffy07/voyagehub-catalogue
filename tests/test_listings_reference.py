@@ -74,3 +74,13 @@ def test_the_committed_data_files_load_and_cover_india():
     assert "indian" in reference.demonyms["IN"]
     assert b"@" not in COUNTRY_CURRENCY_PATH.read_bytes()
     assert b"\r" not in COUNTRY_CURRENCY_PATH.read_bytes()
+
+
+def test_a_short_row_or_a_repeated_country_is_refused(tmp_path):
+    header = "country_iso,currency_code,currency_qid,exponent,note\n"
+    short = write(tmp_path / "s.csv", header + "IN,INR\n")
+    repeated = write(tmp_path / "r.csv", header + "IN,INR,Q1,2,ok\nIN,USD,Q2,2,ok\n")
+
+    for path in (short, repeated):
+        with pytest.raises(PipelineError):
+            load_country_currency(path)

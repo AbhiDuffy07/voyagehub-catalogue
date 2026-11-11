@@ -58,6 +58,8 @@ def _rows(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
 def load_country_currency(path: Path = COUNTRY_CURRENCY_PATH) -> dict[str, CurrencyInfo]:
     table: dict[str, CurrencyInfo] = {}
     for row in _rows(path, ("country_iso", "currency_code", "exponent")):
+        if None in (row["country_iso"], row["currency_code"], row["exponent"]):
+            raise PipelineError(f"{path.name} has a row with missing columns")
         code = row["currency_code"].strip()
         if not code:
             continue  # blank on purpose: several currencies, or none certain
@@ -67,6 +69,8 @@ def load_country_currency(path: Path = COUNTRY_CURRENCY_PATH) -> dict[str, Curre
         digits = row["exponent"].strip()
         if digits and (not digits.isdigit() or int(digits) not in _ALLOWED_EXPONENTS):
             raise PipelineError(f"{path.name}: {iso} has an unexpected exponent")
+        if iso in table:
+            raise PipelineError(f"{path.name}: {iso} appears twice")
         table[iso] = CurrencyInfo(code, int(digits) if digits else None)
     return table
 
@@ -74,6 +78,8 @@ def load_country_currency(path: Path = COUNTRY_CURRENCY_PATH) -> dict[str, Curre
 def load_demonyms(path: Path = DEMONYMS_PATH) -> dict[str, frozenset[str]]:
     words: dict[str, set[str]] = {}
     for row in _rows(path, ("country_iso", "demonym")):
+        if None in (row["country_iso"], row["demonym"]):
+            raise PipelineError(f"{path.name} has a row with missing columns")
         word = row["demonym"].strip().lower()
         if word:
             words.setdefault(row["country_iso"].strip().upper(), set()).add(word)

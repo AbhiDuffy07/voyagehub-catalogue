@@ -216,7 +216,7 @@ def _build_section(
     markers.extend(own_markers)
     text = _plain_text(code)
     if heading is None:
-        if not text and not listings:
+        if not text and not listings and not own_markers:
             return None
         return Section("", "lead", True, "lead", text, listings, own_markers)
     key = section_key(heading)

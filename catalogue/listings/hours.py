@@ -116,6 +116,8 @@ def _twelve(point: _Point, marker: str | None, *, end: bool) -> int:
         return 24 * 60 if end else 0
     if not (1 <= hour <= 12 and minute < 60) or marker is None:
         raise _Ambiguous
+    if end and hour == 12 and minute == 0 and marker == "am":
+        return 24 * 60  # `12AM` as a closing time is midnight, like `midnight`
     return (hour % 12 + (12 if marker == "pm" else 0)) * 60 + minute
 
 

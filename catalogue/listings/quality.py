@@ -26,8 +26,7 @@ EARTH_RADIUS_KM = 6371.0088
 SAME_PLACE_KM = 0.15
 RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "listing_quality.toml"
 _WIKIDATA = re.compile(r"[Qq][1-9][0-9]*")
-_EMAIL = re.compile(r"[^@\s,;:<>]+@[^@\s,;:<>]+\.[^@\s,;:<>]+")
-_EMAIL_SEPARATOR = re.compile(r"\s*[,;]\s*")
+_EMAIL_PART = re.compile(r"[^@\s,;:<>]+")
 _NAME_MARKUP = re.compile(r"\[\[|\]\]|\{\{|\}\}|<[^>]+>|''")
 
 
@@ -74,9 +73,13 @@ def load_rules(path: Path = RULES_PATH) -> QualityRules:
     version = document.get("rules_version")
     if not isinstance(version, int) or isinstance(version, bool):
         raise PipelineError(f"{path.name} needs an integer rules_version")
+    coordinates = document.get("coordinates", {})
+    table = coordinates.get("far_km", {}) if isinstance(coordinates, dict) else None
+    if not isinstance(table, dict):
+        raise PipelineError(f"{path.name}: coordinates.far_km must be a table of page types")
     far: dict[str, float] = {}
     reasons: dict[str, str] = {}
-    for page_type, rule in document.get("coordinates", {}).get("far_km", {}).items():
+    for page_type, rule in table.items():
         km = rule.get("km") if isinstance(rule, dict) else None
         reason = rule.get("reason") if isinstance(rule, dict) else None
         if isinstance(km, bool) or not isinstance(km, int | float) or km <= 0:
@@ -117,6 +120,15 @@ def _url_ok(url: str) -> bool:
     return parts.scheme in ("http", "https") and bool(host) and "." in (host or "")
 
 
+def _email_ok(address: str) -> bool:
+    """One address: local part, one @, a domain with at least one dot. Linear in its length."""
+    local, at, domain = address.partition("@")
+    if not at or "@" in domain or not _EMAIL_PART.fullmatch(local):
+        return False
+    labels = domain.split(".")
+    return len(labels) >= 2 and all(label and _EMAIL_PART.fullmatch(label) for label in labels)
+
+
 def shape_flags(fields: Mapping[str, str]) -> list[str]:
     found: list[str] = []
     name = fields["name"].strip()
@@ -128,7 +140,7 @@ def shape_flags(fields: Mapping[str, str]) -> list[str]:
     if url and not _url_ok(url):
         found.append("url_invalid")
     email = fields["email"].strip()
-    if email and not all(_EMAIL.fullmatch(part) for part in _EMAIL_SEPARATOR.split(email)):
+    if email and not all(_email_ok(part.strip()) for part in re.split(r"[,;]", email)):
         found.append("email_invalid")
     wikidata = fields["wikidata"].strip()
     if wikidata and not _WIKIDATA.fullmatch(wikidata):
@@ -168,6 +180,7 @@ class DupInput(NamedTuple):
     address: str  # `address_label` of the address, or ""
     page_id: int
     ordinal: int
+    from_marker: bool = False  # a pin with no detail is never the original of a full listing
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +220,10 @@ def _basis(earlier: DupInput, later: DupInput) -> str | None:
     return "name_only"  # nothing to compare; low confidence
 
 
+def _order(entry: DupInput) -> tuple[bool, int, int]:
+    return (entry.from_marker, entry.page_id, entry.ordinal)
+
+
 def find_duplicates(entries: Iterable[DupInput]) -> DupResult:
     """Inside one owner, a listing repeating an earlier one of the same kind and name. The result
     does not depend on the order of `entries`; "earlier" means lower (page_id, ordinal)."""
@@ -220,7 +237,7 @@ def find_duplicates(entries: Iterable[DupInput]) -> DupResult:
 
     duplicates: dict[tuple[int, int], tuple[tuple[int, int], str]] = {}
     for members in by_name.values():
-        members.sort(key=lambda m: (m.page_id, m.ordinal))
+        members.sort(key=_order)
         for index, later in enumerate(members[1:], start=1):
             for earlier in members[:index]:
                 basis = _basis(earlier, later)
@@ -233,7 +250,7 @@ def find_duplicates(entries: Iterable[DupInput]) -> DupResult:
 
     same_place: dict[tuple[int, int], tuple[int, int]] = {}
     for members in by_wikidata.values():
-        members.sort(key=lambda m: (m.page_id, m.ordinal))
+        members.sort(key=_order)
         for index, later in enumerate(members):
             other = next((e for e in members[:index] if e.kind != later.kind), None)
             if other:

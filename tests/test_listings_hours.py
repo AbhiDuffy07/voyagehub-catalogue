@@ -138,3 +138,12 @@ def test_everything_else_stays_raw_only(raw):
     result = parse_hours(raw)
 
     assert (result.status, result.parsed) == ("raw_only", None), raw
+
+
+def test_twelve_am_as_a_closing_time_is_midnight_not_overnight():
+    for raw in ("10AM-12AM", "12PM-12AM", "noon-midnight"):
+        result = parsed(raw)
+
+        assert result["schedule"][0]["ranges"][0][1] == "24:00", raw
+        assert result["overnight"] is False, raw
+    assert parsed("12AM-6AM")["schedule"][0]["ranges"] == [["00:00", "06:00"]]

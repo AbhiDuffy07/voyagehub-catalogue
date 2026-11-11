@@ -15,7 +15,7 @@ from typing import Any, BinaryIO, Self
 
 from catalogue.discover.output import ATTRIBUTION, LICENCE, LICENCE_URL, source_url
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def provenance(page: Any, *, dump_date: str, read_at: str) -> dict[str, Any]:

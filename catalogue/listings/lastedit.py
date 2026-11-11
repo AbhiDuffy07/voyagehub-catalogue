@@ -13,7 +13,7 @@ from datetime import date
 
 EARLIEST_YEAR = 2003
 FRESH_YEARS = 2
-_FORMAT = re.compile(r"(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?")
+_FORMAT = re.compile(r"(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?", re.ASCII)
 
 
 @dataclass(frozen=True, slots=True)

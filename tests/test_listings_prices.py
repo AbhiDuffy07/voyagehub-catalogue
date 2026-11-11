@@ -398,3 +398,132 @@ def test_between_x_and_y_is_a_range_not_two_prices():
 
 def test_and_without_between_still_separates_two_prices():
     assert len(price("Adult ₹100 and child ₹50").entries) == 2
+
+
+# --- review findings: numbers that are not prices, size and currency words, "free" ---------------
+
+
+def amounts(raw, country="IN"):
+    return [e["amount"] for e in price(raw, country).entries]
+
+
+def test_a_percentage_is_not_a_price_and_its_words_do_not_label_the_price():
+    result = price("₹500, 10% discount for students")
+
+    assert amounts("₹500, 10% discount for students") == ["500"]
+    assert result.entries[0]["audience"] is None
+    assert result.status == "partial"
+
+
+def test_bare_numbers_next_to_unknown_words_are_not_trusted():
+    for raw in ("Entry 50, closes at 17:30", "Rooms from 1500, sleeps 4", "500, 10% discount"):
+        result = price(raw)
+
+        assert (result.status, result.entries) == ("unparsed", []), raw
+
+
+def test_a_year_like_bare_number_is_an_amount_only_when_it_is_alone():
+    assert amounts("2000") == ["2000"]
+    assert amounts("Prices 2019: 50") == ["50"]
+    assert price("Prices 2019: 50").status == "partial"
+
+
+def test_an_age_range_after_a_category_word_is_not_an_amount():
+    result = price("Adults 50, children 5-12 25")
+
+    assert [(e["audience"], e["amount"]) for e in result.entries] == [
+        ("adult", "50"),
+        ("child", "25"),
+    ]
+    assert result.status == "parsed"
+
+
+def test_free_for_under_fives_is_not_a_price_of_five():
+    result = price("Free for under 5s")
+
+    assert (result.entries, result.is_free) == ([], False)
+
+
+@pytest.mark.parametrize("raw", ["₹3.5 lakh", "₹1.5k", "₹2 crore", "₹3 million", "₹5 thousand"])
+def test_a_size_word_after_an_amount_makes_it_unreadable(raw):
+    result = price(raw)
+
+    assert (result.status, result.entries, result.reason) == ("unparsed", [], "size_word")
+
+
+def test_currency_words_name_the_currency():
+    assert one("300 rupees")["currency"] == "INR"
+    assert one("300 rupees")["amount_minor"] == 30000
+    entry = one("1000 yen")
+    assert (entry["currency"], entry["currency_basis"], entry["amount_minor"]) == (
+        "JPY",
+        "text",
+        1000,
+    )
+    assert one("20 euros")["currency"] == "EUR"
+
+
+def test_a_shared_currency_word_follows_the_same_rule_as_its_symbol():
+    entry = one("10 dollars")
+
+    assert (entry["currency"], entry["currency_ambiguous"]) == (None, True)
+    assert one("10 dollars", "US")["currency"] == "USD"
+
+
+def test_an_unknown_or_fractional_currency_word_is_never_replaced_by_the_default():
+    for raw in ("50 cents", "100 pesos", "20 dirhams"):
+        result = price(raw)
+
+        assert (result.status, result.entries, result.reason) == (
+            "unparsed",
+            [],
+            "currency_word",
+        ), raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["₹2000 with free breakfast", "Rooms ₹1500-3000, free wifi", "₹500 (free cancellation)"],
+)
+def test_free_extras_do_not_make_a_paid_listing_free(raw):
+    result = price(raw)
+
+    assert result.is_free is False
+    assert [e["free"] for e in result.entries] == [False]
+    assert result.status == "partial" and result.reason == "free_unclear"
+
+
+def test_not_free_is_not_free():
+    assert price("Not free").is_free is False
+    assert price("Not free").entries == []
+    assert (price("Not free, ₹100").is_free, amounts("Not free, ₹100")) == (False, ["100"])
+
+
+def test_free_on_some_days_or_for_some_people_is_not_free_for_everyone():
+    assert price("Free on Sundays").is_free is False
+    assert price("₹50 (children free)").is_free is False
+    assert price("Free").is_free is True
+    assert price("Free; camera ₹50").is_free is True
+
+
+@pytest.mark.parametrize(
+    "raw", ["Local beer ₹150", "Local train ₹10", "Kids menu ₹200", "Foreign liquor ₹300"]
+)
+def test_a_category_word_inside_a_longer_phrase_is_a_label_not_an_audience(raw):
+    entry = one(raw)
+
+    assert entry["audience"] is None
+    assert entry["audience_label"] is not None
+
+
+def test_a_heading_before_a_colon_does_not_hide_the_audience():
+    result = price("Fort Museum: children under 15 years free, Indians ₹5")
+
+    assert [e["audience"] for e in result.entries] == ["child", "resident"]
+
+
+@pytest.mark.parametrize("raw", ["₹" + "9" * 4400, "₹1234567890123", "9" * 40])
+def test_a_huge_number_is_ambiguous_not_a_crash(raw):
+    result = price(raw)
+
+    assert (result.status, result.entries, result.reason) == ("unparsed", [], "ambiguous_number")

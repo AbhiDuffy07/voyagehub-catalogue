@@ -10,7 +10,7 @@ import json
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,7 @@ from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
 # Typed markers on these page types are real places on the rendered page, so they become listings.
 MARKER_LISTING_PAGE_TYPES = frozenset({"city", "district", "park"})
 DUPLICATE_SAMPLES = 100  # rows per basis written to duplicates.csv for review
+PRICE_SAMPLES = 100  # rows per reason written to prices_unparsed.csv for review
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,14 @@ class ListingsResult:
                 f"map markers: {totals['markers']}",
             ]
         )
+
+
+def parse_dump_date(dump_date: str) -> date:
+    """`20261101` -> a date; anything else is one clear error, not a failure on every page."""
+    try:
+        return datetime.strptime(dump_date, "%Y%m%d").date()  # noqa: DTZ007 (a calendar day)
+    except ValueError:
+        raise PipelineError(f"the dump date must be YYYYMMDD, not {dump_date!r}") from None
 
 
 def _verify_dump(dump_path: Path, discover_folder: Path) -> str:
@@ -102,7 +111,7 @@ class _Tally:
         self.gap: Counter[str] = Counter()
         self.gap_rows: dict[tuple[str, str, str], Counter[str]] = {}
         self.dup_samples: list[list[Any]] = []
-        self.price_samples: list[tuple[str, int, int, str]] = []  # reason, page, ordinal, text
+        self.price_samples: dict[str, list[tuple[int, int, str]]] = {}  # page, ordinal, text
         self.price_status: Counter[str] = Counter()
         self.hours_status: Counter[str] = Counter()
         self.lastedit_status: Counter[str] = Counter()
@@ -168,12 +177,12 @@ def _build_page(
     by_title: dict[str, dict[str, Any]],
     slugs: dict[int, RegistryEntry],
     dump_date: str,
+    dump_day: date,
     read_at: str,
     reference: Reference,
     rules: QualityRules,
 ) -> _PageRows:
     content = parse_page(dump_page.text)
-    dump_day = date.fromisoformat(f"{dump_date[:4]}-{dump_date[4:6]}-{dump_date[6:]}")
     owner = resolve_owner(row, by_title)
     slug = slugs[owner.page_id].slug if owner and owner.page_id in slugs else ""
     page_fields = {
@@ -255,6 +264,7 @@ def _build_page(
                     address=address_label(fields["address"]),
                     page_id=dump_page.page_id,
                     ordinal=ordinal,
+                    from_marker=listing.from_marker,
                 )
             )
             built.listings.append(
@@ -300,6 +310,7 @@ def run_fetch_listings(
     reference: Reference | None = None,
     rules: QualityRules | None = None,
 ) -> ListingsResult:
+    dump_day = parse_dump_date(dump_date)
     reference = reference if reference is not None else load_reference()
     rules = rules if rules is not None else load_rules()
     country_filter = country_iso.upper() if country_iso else None
@@ -336,7 +347,7 @@ def run_fetch_listings(
                 continue
             try:
                 built = _build_page(
-                    dump_page, row, by_title, slugs, dump_date, read_at, reference, rules
+                    dump_page, row, by_title, slugs, dump_date, dump_day, read_at, reference, rules
                 )
             except Exception as exc:  # noqa: BLE001
                 # One unreadable page must not stop a world run. It is counted, listed by ID,
@@ -524,6 +535,7 @@ def _finisher(tally: _Tally, keys: dict[tuple[int, int], str], dups: Any):
                 )
         if pair in dups.same_place:
             out["same_place_as"] = keys[dups.same_place[pair]]
+            out["quality_flags"] = [*out["quality_flags"], "same_place_as"]
             for counter in (tally.flags, stats.flags):
                 counter["same_place_as"] += 1
         return out
@@ -534,19 +546,26 @@ def _finisher(tally: _Tally, keys: dict[tuple[int, int], str], dups: Any):
 def _sample_price(tally: _Tally, row: dict[str, Any]) -> None:
     if row["price_status"] in ("unparsed", "partial"):
         reason = f"{row['price_status']}:{row['price_reason']}"
-        tally.price_samples.append((reason, row["page_id"], row["ordinal"], row["price"]))
+        samples = tally.price_samples.setdefault(reason, [])
+        samples.append((row["page_id"], row["ordinal"], row["price"]))
+        if len(samples) > 4 * PRICE_SAMPLES:  # keep memory flat: only the smallest page IDs count
+            samples.sort()
+            del samples[PRICE_SAMPLES:]
 
 
-def _write_price_samples(
-    target: Path, tally: _Tally, keys: dict[tuple[int, int], str], per_reason: int = 100
-) -> None:
+def _safe_cell(value: Any) -> Any:
+    """A review CSV is opened in a spreadsheet: raw wiki text must not start a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def _write_price_samples(target: Path, tally: _Tally, keys: dict[tuple[int, int], str]) -> None:
     """A review sample of prices not fully read: the first rows by page ID, per reason."""
-    kept: Counter[str] = Counter()
     rows = []
-    for reason, page_id, ordinal, text in sorted(tally.price_samples):
-        if kept[reason] < per_reason:
-            kept[reason] += 1
-            rows.append([reason, page_id, keys[(page_id, ordinal)], text])
+    for reason in sorted(tally.price_samples):
+        for page_id, ordinal, text in sorted(tally.price_samples[reason])[:PRICE_SAMPLES]:
+            rows.append([reason, page_id, _safe_cell(keys[(page_id, ordinal)]), _safe_cell(text)])
     header = ["reason", "page_id", "listing_key", "price"]
     write_text(target / "prices_unparsed.csv", _csv_text(header, rows))
 
@@ -567,12 +586,15 @@ def _write_reports(
         target / "duplicates.csv",
         _csv_text(
             ["basis", "owner", "kind", "name", "listing_key", "duplicate_of"],
-            sorted(tally.dup_samples, key=lambda r: (r[0], r[4])),
+            [
+                [_safe_cell(cell) for cell in row]
+                for row in sorted(tally.dup_samples, key=lambda r: (r[0], r[4]))
+            ],
         ),
     )
     gap_header = ["country_iso", "dimension", "value", "no_coordinates", *report.GAP_ORDER]
     gap_body = [
-        [iso, dimension, value, c["no_coordinates"], *(c[g] for g in report.GAP_ORDER)]
+        [iso, dimension, _safe_cell(value), c["no_coordinates"], *(c[g] for g in report.GAP_ORDER)]
         for (iso, dimension, value), c in sorted(tally.gap_rows.items())
     ]
     write_text(target / "wikidata_gap.csv", _csv_text(gap_header, gap_body))

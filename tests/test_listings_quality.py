@@ -184,8 +184,19 @@ def test_the_three_groups_of_listings_without_coordinates():
 # --- duplicates ---------------------------------------------------------------------------------
 
 
-def dup(page_id, ordinal, name="fort", *, scope=1, kind="see", wikidata="", point=None, address=""):
-    return DupInput(scope, kind, name, wikidata, point, address, page_id, ordinal)
+def dup(
+    page_id,
+    ordinal,
+    name="fort",
+    *,
+    scope=1,
+    kind="see",
+    wikidata="",
+    point=None,
+    address="",
+    from_marker=False,
+):
+    return DupInput(scope, kind, name, wikidata, point, address, page_id, ordinal, from_marker)
 
 
 def test_a_name_normalises_case_accents_and_punctuation_but_not_other_scripts():
@@ -243,7 +254,7 @@ def test_the_same_wikidata_under_two_kinds_is_the_same_place_not_a_duplicate():
     assert result.same_place == {(1, 2): (1, 1)}
 
 
-def test_a_chain_points_at_the_nearest_earlier_match():
+def test_a_chain_points_at_the_earliest_earlier_match_that_fits():
     result = find_duplicates(
         [
             dup(1, 1, point=(9.9000, 76.2)),
@@ -290,6 +301,7 @@ def test_the_committed_rules_file_loads_and_every_threshold_has_its_reason():
 
 
 def test_a_list_of_good_emails_is_not_flagged_but_one_bad_one_in_it_is():
+    assert shape(email="a@b.org, c@d") == ["email_invalid"]
     assert shape(email="a@b.org, c@d.org") == []
     assert shape(email="a@b.org ; c@d.org") == []
     assert shape(email="a@b.org,c@d.org") == []
@@ -319,3 +331,25 @@ def test_coordinates_decide_before_the_address_does():
     )
 
     assert far.duplicates == {}
+
+
+def test_a_marker_row_is_never_the_original_of_a_full_listing():
+    result = find_duplicates([dup(1, 1, from_marker=True), dup(1, 5)])
+
+    assert result.duplicates == {(1, 1): ((1, 5), "name_only")}
+
+
+def test_a_very_long_email_is_checked_in_linear_time():
+    import time
+
+    start = time.perf_counter()
+    assert shape(email="a" * 80000) == ["email_invalid"]
+    assert shape(email="a@" + "b." * 40000 + "c") == []
+    assert time.perf_counter() - start < 2
+
+
+def test_the_rules_loader_reports_a_malformed_file_as_a_pipeline_error(tmp_path):
+    with pytest.raises(PipelineError):
+        load_rules(write(tmp_path, 'rules_version = 1\ncoordinates = "x"\n'))
+    with pytest.raises(PipelineError):
+        load_rules(write(tmp_path, "rules_version = 1\n[coordinates]\nfar_km = 5\n"))

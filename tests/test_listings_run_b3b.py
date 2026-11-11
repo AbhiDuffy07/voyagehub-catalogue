@@ -410,3 +410,37 @@ def test_the_reports_list_the_flags_and_the_wikidata_gap(tmp_path):
         assert "| has a Wikidata ID | 1 |" in text
         assert "| a Wikipedia link only | 1 |" in text
         assert "| neither | 2 |" in text
+
+
+def test_a_malformed_dump_date_is_one_clear_error():
+    from catalogue.errors import PipelineError
+    from catalogue.listings.run import parse_dump_date
+
+    assert parse_dump_date("20261101").isoformat() == "2026-11-01"
+    for bad in ("2026-11", "20261301", "abcdefgh", ""):
+        with pytest.raises(PipelineError):
+            parse_dump_date(bad)
+
+
+def test_the_same_place_link_is_also_a_flag_on_the_row(quality_run):
+    row = by_name(quality_run)
+
+    assert "same_place_as" in row["Fort Cafe"]["quality_flags"]
+    assert quality_run.totals["quality_flags"]["same_place_as"] == 1
+
+
+def test_a_marker_in_an_empty_lead_still_becomes_a_listing(tmp_path):
+    marker = "{{marker|type=see|name=Lonely Fort|lat=1|long=2}}"
+    pages = [page("Kochi", "{{pagebanner}}" + marker, page_id=3)]
+
+    result = build(tmp_path, pages)
+
+    assert [r["name"] for r in rows(result)] == ["Lonely Fort"]
+
+
+def test_review_csv_cells_cannot_start_a_spreadsheet_formula():
+    from catalogue.listings.run import _safe_cell
+
+    assert _safe_cell("=SUM(A1)") == "'=SUM(A1)"
+    assert _safe_cell("+1") == "'+1" and _safe_cell("@x") == "'@x"
+    assert _safe_cell("Palace") == "Palace" and _safe_cell(5) == 5

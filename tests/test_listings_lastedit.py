@@ -77,3 +77,7 @@ def test_the_month_of_the_dump_is_plausible():
 )
 def test_age_class_against_the_two_year_cutoff(raw, expected):
     assert age_class(parse_lastedit(raw, dump_date=DUMP), dump_date=DUMP) == expected
+
+
+def test_non_ascii_digits_are_not_a_date():
+    assert parse_lastedit("２０２５-０１-０２", dump_date=DUMP).status == "unparsed"

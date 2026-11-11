@@ -30,7 +30,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import NamedTuple
 
-_WIKIDATA = re.compile(r"Q[0-9]+")
+_WIKIDATA = re.compile(r"Q[1-9][0-9]*")
 KEY_VERSION = 2
 MAX_SLUG_LENGTH = 80
 _HASH_LENGTH = 8
