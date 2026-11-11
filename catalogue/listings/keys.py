@@ -52,7 +52,7 @@ def _short_hash(text: str) -> str:
     return digest[:_HASH_LENGTH]
 
 
-def _words(text: str) -> list[str]:
+def words(text: str) -> list[str]:
     """NFKC, case-folded words made of letters, digits and combining marks (any script)."""
     folded = unicodedata.normalize("NFKC", text).casefold()
     kept = "".join(c if unicodedata.category(c)[0] in "LNM" else " " for c in folded)
@@ -61,7 +61,7 @@ def _words(text: str) -> list[str]:
 
 def key_slug(name: str) -> str:
     """The name part of a listing key. Empty or unreadable names give `unnamed`."""
-    slug = "-".join(_words(name))
+    slug = "-".join(words(name))
     if not slug:
         return "unnamed"
     if len(slug) > MAX_SLUG_LENGTH:
@@ -81,7 +81,7 @@ def _coordinate_label(lat: str, long: str) -> str:
 
 
 def _address_label(address: str) -> str:
-    normal = " ".join(_words(address))
+    normal = " ".join(words(address))
     return "a" + _short_hash(normal) if normal else ""
 
 
