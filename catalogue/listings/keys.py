@@ -80,7 +80,7 @@ def _coordinate_label(lat: str, long: str) -> str:
     return "c" + _short_hash(f"{latitude:.4f},{longitude:.4f}")
 
 
-def _address_label(address: str) -> str:
+def address_label(address: str) -> str:
     normal = " ".join(words(address))
     return "a" + _short_hash(normal) if normal else ""
 
@@ -89,7 +89,7 @@ def _label(entry: KeyInput) -> str:
     wikidata = entry.wikidata.strip().upper()
     if _WIKIDATA.fullmatch(wikidata):
         return wikidata
-    return _coordinate_label(entry.lat, entry.long) or _address_label(entry.address)
+    return _coordinate_label(entry.lat, entry.long) or address_label(entry.address)
 
 
 def assign_keys(entries: Iterable[KeyInput]) -> dict[tuple[int, int], str]:

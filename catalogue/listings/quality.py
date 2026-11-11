@@ -27,6 +27,7 @@ SAME_PLACE_KM = 0.15
 RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "listing_quality.toml"
 _WIKIDATA = re.compile(r"[Qq][1-9][0-9]*")
 _EMAIL = re.compile(r"[^@\s,;:<>]+@[^@\s,;:<>]+\.[^@\s,;:<>]+")
+_EMAIL_SEPARATOR = re.compile(r"\s*[,;]\s*")
 _NAME_MARKUP = re.compile(r"\[\[|\]\]|\{\{|\}\}|<[^>]+>|''")
 
 
@@ -127,7 +128,7 @@ def shape_flags(fields: Mapping[str, str]) -> list[str]:
     if url and not _url_ok(url):
         found.append("url_invalid")
     email = fields["email"].strip()
-    if email and not _EMAIL.fullmatch(email):
+    if email and not all(_EMAIL.fullmatch(part) for part in _EMAIL_SEPARATOR.split(email)):
         found.append("email_invalid")
     wikidata = fields["wikidata"].strip()
     if wikidata and not _WIKIDATA.fullmatch(wikidata):
@@ -164,6 +165,7 @@ class DupInput(NamedTuple):
     name: str  # normalised, see `normalised_name`
     wikidata: str  # valid upper-case ID or ""
     point: tuple[float, float] | None
+    address: str  # `address_label` of the address, or ""
     page_id: int
     ordinal: int
 
@@ -198,6 +200,10 @@ def _basis(earlier: DupInput, later: DupInput) -> str | None:
     if earlier.point and later.point:
         close = distance_km(earlier.point, later.point) <= SAME_PLACE_KM
         return "name_and_coords" if close else None  # far apart: another branch of the same name
+    if earlier.address and later.address:
+        # No coordinates to compare: the same address is a duplicate, another address is another
+        # branch (two Pizza Huts in one city).
+        return "name_and_address" if earlier.address == later.address else None
     return "name_only"  # nothing to compare; low confidence
 
 

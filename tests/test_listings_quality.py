@@ -133,7 +133,7 @@ def test_good_emails_are_not_flagged(email):
 
 
 @pytest.mark.parametrize(
-    "email", ["a@b", "a b@c.org", "@x.org", "a@@b.org", "a@b.org, c@d.org", "mailto:a@b.org"]
+    "email", ["a@b", "a b@c.org", "@x.org", "a@@b.org", "mailto:a@b.org", "a@b.org, c@d"]
 )
 def test_bad_emails_are_flagged(email):
     assert shape(email=email) == ["email_invalid"]
@@ -184,8 +184,8 @@ def test_the_three_groups_of_listings_without_coordinates():
 # --- duplicates ---------------------------------------------------------------------------------
 
 
-def dup(page_id, ordinal, name="fort", *, scope=1, kind="see", wikidata="", point=None):
-    return DupInput(scope, kind, name, wikidata, point, page_id, ordinal)
+def dup(page_id, ordinal, name="fort", *, scope=1, kind="see", wikidata="", point=None, address=""):
+    return DupInput(scope, kind, name, wikidata, point, address, page_id, ordinal)
 
 
 def test_a_name_normalises_case_accents_and_punctuation_but_not_other_scripts():
@@ -287,3 +287,35 @@ def test_the_committed_rules_file_loads_and_every_threshold_has_its_reason():
     assert {"city", "district", "park"} <= set(rules.far_km)
     assert set(rules.reasons) == set(rules.far_km)
     assert all(len(reason) > 40 for reason in rules.reasons.values())
+
+
+def test_a_list_of_good_emails_is_not_flagged_but_one_bad_one_in_it_is():
+    assert shape(email="a@b.org, c@d.org") == []
+    assert shape(email="a@b.org ; c@d.org") == []
+    assert shape(email="a@b.org,c@d.org") == []
+
+
+def test_the_same_name_with_the_same_address_is_a_duplicate_on_that_basis():
+    result = find_duplicates([dup(1, 1, address="a1"), dup(1, 2, address="a1")])
+
+    assert result.duplicates == {(1, 2): ((1, 1), "name_and_address")}
+
+
+def test_the_same_name_at_different_addresses_is_another_branch_not_a_duplicate():
+    result = find_duplicates([dup(1, 1, address="a1"), dup(1, 2, address="a2")])
+
+    assert result.duplicates == {}
+
+
+def test_an_address_on_one_side_only_is_not_enough_to_compare():
+    result = find_duplicates([dup(1, 1, address="a1"), dup(1, 2)])
+
+    assert result.duplicates == {(1, 2): ((1, 1), "name_only")}
+
+
+def test_coordinates_decide_before_the_address_does():
+    far = find_duplicates(
+        [dup(1, 1, address="a1", point=(9.9, 76.2)), dup(1, 2, address="a1", point=(9.95, 76.2))]
+    )
+
+    assert far.duplicates == {}

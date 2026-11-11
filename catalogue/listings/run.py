@@ -21,7 +21,7 @@ from catalogue.discover.slugs import RegistryEntry, load_registry
 from catalogue.errors import PipelineError
 from catalogue.listings import report
 from catalogue.listings.interpret import Interpreted, interpret
-from catalogue.listings.keys import KEY_VERSION, KeyInput, assign_keys, key_slug
+from catalogue.listings.keys import KEY_VERSION, KeyInput, address_label, assign_keys, key_slug
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
 from catalogue.listings.quality import (
     DupInput,
@@ -252,6 +252,7 @@ def _build_page(
                     name=normalised_name(fields["name"]),
                     wikidata=valid_wikidata(fields["wikidata"]),
                     point=point,
+                    address=address_label(fields["address"]),
                     page_id=dump_page.page_id,
                     ordinal=ordinal,
                 )
