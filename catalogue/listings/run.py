@@ -9,7 +9,7 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -23,7 +23,19 @@ from catalogue.listings import report
 from catalogue.listings.interpret import Interpreted, interpret
 from catalogue.listings.keys import KEY_VERSION, KeyInput, assign_keys, key_slug
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
-from catalogue.listings.quality import distance_km, parse_coordinate
+from catalogue.listings.quality import (
+    DupInput,
+    QualityRules,
+    coordinate_flags,
+    distance_km,
+    find_duplicates,
+    gap_group,
+    load_rules,
+    normalised_name,
+    parse_coordinate,
+    shape_flags,
+    valid_wikidata,
+)
 from catalogue.listings.reference import Reference, load_reference
 from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
@@ -31,6 +43,7 @@ from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
 
 # Typed markers on these page types are real places on the rendered page, so they become listings.
 MARKER_LISTING_PAGE_TYPES = frozenset({"city", "district", "park"})
+DUPLICATE_SAMPLES = 100  # rows per basis written to duplicates.csv for review
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +96,12 @@ class _Tally:
         self.failures: list[tuple[int, str, str]] = []
         self.by_kind: Counter[str] = Counter()
         self.by_role: Counter[str] = Counter()
+        self.dup_inputs: list[DupInput] = []
+        self.flags: Counter[str] = Counter()
+        self.dup_basis: Counter[str] = Counter()
+        self.gap: Counter[str] = Counter()
+        self.gap_rows: dict[tuple[str, str, str], Counter[str]] = {}
+        self.dup_samples: list[list[Any]] = []
         self.price_samples: list[tuple[str, int, int, str]] = []  # reason, page, ordinal, text
         self.price_status: Counter[str] = Counter()
         self.hours_status: Counter[str] = Counter()
@@ -112,6 +131,35 @@ class _PageRows:
     owner: Owner | None
     region: str
     marker_listings: int = 0
+    dup_inputs: list[DupInput] = field(default_factory=list)
+
+
+def _quality_fields(
+    fields: dict[str, str],
+    point: tuple[float, float] | None,
+    distance: float | None,
+    page_type: str | None,
+    rules: QualityRules,
+) -> dict[str, Any]:
+    """The flags and the Wikidata-gap group of one listing. Duplicate fields are filled in when
+    the files are finished, because they need every listing of the owner."""
+    flags = [
+        *coordinate_flags(
+            fields["lat"], fields["long"], distance_km=distance, page_type=page_type, rules=rules
+        ),
+        *shape_flags(fields),
+    ]
+    return {
+        "quality_flags": flags,
+        "coord_gap": gap_group(
+            has_coordinates=point is not None,
+            wikidata=fields["wikidata"],
+            wikipedia=fields["wikipedia"],
+        ),
+        "duplicate_of": None,
+        "duplicate_basis": None,
+        "same_place_as": None,
+    }
 
 
 def _build_page(
@@ -122,6 +170,7 @@ def _build_page(
     dump_date: str,
     read_at: str,
     reference: Reference,
+    rules: QualityRules,
 ) -> _PageRows:
     content = parse_page(dump_page.text)
     dump_day = date.fromisoformat(f"{dump_date[:4]}-{dump_date[4:6]}-{dump_date[6:]}")
@@ -196,12 +245,24 @@ def _build_page(
                     address=fields["address"],
                 )
             )
+            built.dup_inputs.append(
+                DupInput(
+                    scope=owner.page_id if owner else dump_page.page_id,
+                    kind=listing.kind,
+                    name=normalised_name(fields["name"]),
+                    wikidata=valid_wikidata(fields["wikidata"]),
+                    point=point,
+                    page_id=dump_page.page_id,
+                    ordinal=ordinal,
+                )
+            )
             built.listings.append(
                 {
                     **page_fields,
                     **prov,
                     **fields,
                     **read.fields,
+                    **_quality_fields(fields, point, distance, row["type"], rules),
                     "coord_distance_km": distance,
                     "kind": listing.kind,
                     "listing_type": listing.listing_type,
@@ -236,8 +297,10 @@ def run_fetch_listings(
     detail_countries: Sequence[str] = (),
     proving_titles: Sequence[str] = (),
     reference: Reference | None = None,
+    rules: QualityRules | None = None,
 ) -> ListingsResult:
     reference = reference if reference is not None else load_reference()
+    rules = rules if rules is not None else load_rules()
     country_filter = country_iso.upper() if country_iso else None
     dump_sha1 = _verify_dump(dump_path, discover_folder)
     articles_path = discover_folder / "articles.jsonl"
@@ -271,7 +334,9 @@ def run_fetch_listings(
             if country_filter and row["tree_country_iso"] != country_filter:
                 continue
             try:
-                built = _build_page(dump_page, row, by_title, slugs, dump_date, read_at, reference)
+                built = _build_page(
+                    dump_page, row, by_title, slugs, dump_date, read_at, reference, rules
+                )
             except Exception as exc:  # noqa: BLE001
                 # One unreadable page must not stop a world run. It is counted, listed by ID,
                 # title and error class (never the message, which could quote page text) in
@@ -288,6 +353,7 @@ def run_fetch_listings(
             for marker_row in built.markers:
                 markers_out.add(marker_row)
             tally.key_inputs.extend(built.key_inputs)
+            tally.dup_inputs.extend(built.dup_inputs)
             for listing, section_key, read in built.counted:
                 _count(
                     tally,
@@ -302,6 +368,7 @@ def run_fetch_listings(
                 )
             for listing_row in built.listings:
                 _sample_price(tally, listing_row)
+                _note_quality(tally, stats, listing_row)
                 if listing_row["coord_distance_km"] is not None:
                     page_type = listing_row["page_type"] or report.NO_TYPE
                     stats.distances.setdefault(page_type, []).append(
@@ -309,9 +376,7 @@ def run_fetch_listings(
                     )
 
         keys = assign_keys(tally.key_inputs)
-        listings_out.finish(
-            lambda r: {**r, "listing_key": keys[(r["page_id"], r["ordinal"])]},
-        )
+        listings_out.finish(_finisher(tally, keys, find_duplicates(tally.dup_inputs)))
         sections_out.finish()
         markers_out.finish()
 
@@ -332,6 +397,9 @@ def run_fetch_listings(
         "lastedit_status": dict(tally.lastedit_status),
         "price_age": dict(tally.price_age),
         "hours_age": dict(tally.hours_age),
+        "quality_flags": dict(sorted(tally.flags.items())),
+        "duplicates_by_basis": dict(sorted(tally.dup_basis.items())),
+        "wikidata_gap": dict(sorted(tally.gap.items())),
     }
     _write_price_samples(target, tally, keys)
     _write_reports(
@@ -350,6 +418,8 @@ def run_fetch_listings(
         target / "manifest.json",
         {
             "schema_version": SCHEMA_VERSION,
+            "key_version": KEY_VERSION,
+            "quality_rules_version": rules.version,
             "dump_date": dump_date,
             "dump_sha1": dump_sha1,
             "articles_sha256": articles_sha256,
@@ -401,6 +471,65 @@ def _count(tally, stats, listing, section_key, region, owner, role, today, read)
         counts["own"] += 1
 
 
+def _note_quality(tally: _Tally, stats: report.CountryStats, row: dict[str, Any]) -> None:
+    for flag in row["quality_flags"]:
+        tally.flags[flag] += 1
+        stats.flags[flag] += 1
+    group = row["coord_gap"]
+    if group is None:
+        return
+    tally.gap[group] += 1
+    stats.gap[group] += 1
+    dimensions = (
+        ("country", row["country"] or report.NO_COUNTRY),
+        ("type", row["kind"]),
+        ("city", row["owner_title"] or "(no owner)"),
+    )
+    for dimension, value in dimensions:
+        key = (row["country_iso"] or "", dimension, value)
+        counter = tally.gap_rows.setdefault(key, Counter())
+        counter["no_coordinates"] += 1
+        counter[group] += 1
+
+
+def _finisher(tally: _Tally, keys: dict[tuple[int, int], str], dups: Any):
+    """The last pass over every listing row: its final key and its duplicate fields. Rows arrive
+    in (page_id, ordinal) order, so the samples and counts do not depend on the dump's order."""
+    sampled: Counter[str] = Counter()
+
+    def finish(row: dict[str, Any]) -> dict[str, Any]:
+        pair = (row["page_id"], row["ordinal"])
+        out = {**row, "listing_key": keys[pair]}
+        stats = tally.country(row["country"], row["country_iso"])
+        if pair in dups.duplicates:
+            original, basis = dups.duplicates[pair]
+            out.update(duplicate_of=keys[original], duplicate_basis=basis)
+            out["quality_flags"] = [*row["quality_flags"], "duplicate"]
+            for counter in (tally.flags, stats.flags):
+                counter["duplicate"] += 1
+            tally.dup_basis[basis] += 1
+            stats.dup_basis[basis] += 1
+            if sampled[basis] < DUPLICATE_SAMPLES:
+                sampled[basis] += 1
+                tally.dup_samples.append(
+                    [
+                        basis,
+                        row["owner_title"],
+                        row["kind"],
+                        row["name"],
+                        keys[pair],
+                        keys[original],
+                    ]
+                )
+        if pair in dups.same_place:
+            out["same_place_as"] = keys[dups.same_place[pair]]
+            for counter in (tally.flags, stats.flags):
+                counter["same_place_as"] += 1
+        return out
+
+    return finish
+
+
 def _sample_price(tally: _Tally, row: dict[str, Any]) -> None:
     if row["price_status"] in ("unparsed", "partial"):
         reason = f"{row['price_status']}:{row['price_reason']}"
@@ -433,6 +562,19 @@ def _write_reports(
     proving_titles: Sequence[str],
     dump_date: str,
 ) -> None:
+    write_text(
+        target / "duplicates.csv",
+        _csv_text(
+            ["basis", "owner", "kind", "name", "listing_key", "duplicate_of"],
+            sorted(tally.dup_samples, key=lambda r: (r[0], r[4])),
+        ),
+    )
+    gap_header = ["country_iso", "dimension", "value", "no_coordinates", *report.GAP_ORDER]
+    gap_body = [
+        [iso, dimension, value, c["no_coordinates"], *(c[g] for g in report.GAP_ORDER)]
+        for (iso, dimension, value), c in sorted(tally.gap_rows.items())
+    ]
+    write_text(target / "wikidata_gap.csv", _csv_text(gap_header, gap_body))
     failures = sorted(tally.failures)
     write_text(target / "parse_failures.csv", _csv_text(["page_id", "title", "error"], failures))
     header, rows = report.counts_by_country_rows(tally.stats)

@@ -278,3 +278,12 @@ def test_an_unnamed_listing_is_never_a_duplicate_of_another_unnamed_one():
     result = find_duplicates([dup(1, 1, name=""), dup(1, 2, name="")])
 
     assert result.duplicates == {}
+
+
+def test_the_committed_rules_file_loads_and_every_threshold_has_its_reason():
+    rules = load_rules()
+
+    assert rules.version >= 1
+    assert {"city", "district", "park"} <= set(rules.far_km)
+    assert set(rules.reasons) == set(rules.far_km)
+    assert all(len(reason) > 40 for reason in rules.reasons.values())

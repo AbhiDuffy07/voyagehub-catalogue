@@ -6,6 +6,7 @@ import pytest
 
 from catalogue.discover.dump import sha1_of
 from catalogue.discover.slugs import RegistryEntry, save_registry
+from catalogue.listings.quality import QualityRules
 from catalogue.listings.reference import CurrencyInfo, Reference
 from catalogue.listings.run import run_fetch_listings
 from tests.dumpfixture import page, write_dump
@@ -17,7 +18,7 @@ ALL_ARTICLES = [
 ]
 
 
-def build(tmp_path, pages, articles=ALL_ARTICLES, reference=None, **kwargs):
+def build(tmp_path, pages, articles=ALL_ARTICLES, reference=None, rules=None, **kwargs):
     dump = write_dump(tmp_path / "dump.xml.bz2", pages)
     discover = tmp_path / "discover" / "20261101"
     discover.mkdir(parents=True)
@@ -36,6 +37,7 @@ def build(tmp_path, pages, articles=ALL_ARTICLES, reference=None, **kwargs):
         registry_path=registry,
         today=TODAY,
         reference=reference if reference is not None else Reference(),
+        rules=rules if rules is not None else QualityRules(version=1, far_km={}),
         **kwargs,
     )
 
@@ -284,3 +286,127 @@ def test_the_reports_show_distance_percentiles_by_page_type(tmp_path):
         text = (result.output_dir / name).read_text(encoding="utf-8")
         assert "## Distance from the page's own geo, by page type" in text
         assert "| city | 2 |" in text
+
+
+# --- quality flags, duplicates and the Wikidata gap ------------------------------------------
+
+QUALITY_PAGES = [
+    page(
+        "Kochi",
+        "{{geo|9.9312|76.2673}}\n== See ==\n"
+        "{{see|name=Near|lat=9.94|long=76.27}}\n"
+        "{{see|name=Far|lat=10.9|long=77.5}}\n"
+        "{{see|name=Nowhere|wikidata=Q5}}\n"
+        "{{see|name=Linked|wikipedia=Linked}}\n"
+        "{{see|name=Nothing}}\n"
+        "{{see|name=Bad|lat=x|long=y}}\n"
+        "{{see|name=Web|lat=9.94|long=76.27|url=www.example.org|email=nope}}\n"
+        "{{see|name=[[Marked]]|lat=9.94|long=76.27}}\n"
+        "{{see|name=Palace|wikidata=Q9|lat=9.93|long=76.26}}\n"
+        "{{see|name=Fort|wikidata=Q7|lat=9.93|long=76.26}}\n"
+        "== Eat ==\n{{eat|name=Fort Cafe|wikidata=Q7|lat=9.93|long=76.26}}",
+        page_id=3,
+    ),
+    page(
+        "Fort Kochi",
+        "== See ==\n{{see|name=Palace|wikidata=Q9|lat=9.96|long=76.24}}",
+        page_id=4,
+    ),
+]
+QUALITY_RULES = QualityRules(version=7, far_km={"city": 100.0})
+
+
+@pytest.fixture
+def quality_run(tmp_path):
+    return build(tmp_path, QUALITY_PAGES, rules=QUALITY_RULES)
+
+
+def test_every_listing_has_quality_flags_in_a_fixed_order(quality_run):
+    row = by_name(quality_run)
+
+    assert row["Near"]["quality_flags"] == []
+    assert row["Far"]["quality_flags"] == ["coord_far"]
+    assert row["Nowhere"]["quality_flags"] == ["coord_missing"]
+    assert row["Bad"]["quality_flags"] == ["coord_invalid"]
+    assert row["Web"]["quality_flags"] == ["url_invalid", "email_invalid"]
+    assert row["[[Marked]]"]["quality_flags"] == ["name_markup"]
+
+
+def test_a_page_without_a_usable_geo_leaves_the_coordinates_unchecked(quality_run):
+    second_palace = next(r for r in rows(quality_run) if r["page_id"] == 4)
+
+    assert "coord_unchecked" in second_palace["quality_flags"]
+    assert second_palace["coord_distance_km"] is None
+
+
+def test_listings_without_coordinates_are_grouped_by_what_could_fill_them(quality_run):
+    row = by_name(quality_run)
+
+    assert row["Nowhere"]["coord_gap"] == "has_wikidata"
+    assert row["Linked"]["coord_gap"] == "wikipedia_only"
+    assert row["Nothing"]["coord_gap"] == "neither"
+    assert row["Bad"]["coord_gap"] == "neither"
+    assert row["Near"]["coord_gap"] is None
+
+
+def test_the_gap_is_counted_per_country_type_and_city(quality_run):
+    text = (quality_run.output_dir / "wikidata_gap.csv").read_text(encoding="utf-8").splitlines()
+
+    assert (
+        text[0] == "country_iso,dimension,value,no_coordinates,has_wikidata,wikipedia_only,neither"
+    )
+    assert "IN,country,India,4,1,1,2" in text
+    assert "IN,type,see,4,1,1,2" in text
+    assert "IN,city,Kochi,4,1,1,2" in text
+
+
+def test_a_later_duplicate_points_at_the_earlier_listing_across_a_city_and_its_district(
+    quality_run,
+):
+    palaces = [r for r in rows(quality_run) if r["name"] == "Palace"]
+    first, second = palaces
+
+    assert (first["duplicate_of"], first["duplicate_basis"]) == (None, None)
+    assert second["duplicate_of"] == first["listing_key"]
+    assert second["duplicate_basis"] == "wikidata"
+    assert "duplicate" in second["quality_flags"]
+    assert first["listing_key"] != second["listing_key"]
+
+
+def test_the_same_place_under_two_kinds_is_linked_but_not_a_duplicate(quality_run):
+    row = by_name(quality_run)
+
+    assert row["Fort Cafe"]["same_place_as"] == row["Fort"]["listing_key"]
+    assert row["Fort Cafe"]["duplicate_of"] is None
+    assert row["Fort"]["same_place_as"] is None
+
+
+def test_the_flag_counts_and_the_rules_version_reach_the_totals_and_the_manifest(quality_run):
+    flags = quality_run.totals["quality_flags"]
+
+    assert flags["coord_far"] == 1 and flags["coord_missing"] == 3 and flags["coord_invalid"] == 1
+    assert flags["url_invalid"] == 1 and flags["email_invalid"] == 1 and flags["name_markup"] == 1
+    assert flags["duplicate"] == 1
+    assert quality_run.totals["duplicates_by_basis"] == {"wikidata": 1}
+    manifest = json.loads((quality_run.output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["quality_rules_version"] == 7 and manifest["key_version"] == 2
+
+
+def test_duplicates_are_sampled_for_review(quality_run):
+    text = (quality_run.output_dir / "duplicates.csv").read_text(encoding="utf-8").splitlines()
+
+    assert text[0] == "basis,owner,kind,name,listing_key,duplicate_of"
+    assert len(text) == 2 and text[1].startswith("wikidata,Kochi,see,Palace,")
+
+
+def test_the_reports_list_the_flags_and_the_wikidata_gap(tmp_path):
+    result = build(tmp_path, QUALITY_PAGES, rules=QUALITY_RULES, detail_countries=["IN"])
+
+    for name in ("report.md", "detail-IN.md"):
+        text = (result.output_dir / name).read_text(encoding="utf-8")
+        assert "## Quality flags" in text
+        assert "| coord_far | 1 |" in text
+        assert "## Listings without coordinates: what could fill them in" in text
+        assert "| has a Wikidata ID | 1 |" in text
+        assert "| a Wikipedia link only | 1 |" in text
+        assert "| neither | 2 |" in text

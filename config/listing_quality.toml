@@ -1,0 +1,43 @@
+# Quality rules for listings (B3b). They FLAG; no listing is dropped or changed.
+#
+# coord_far: a listing whose coordinates are further than `km` from its page's own {{geo}} point.
+# A page type with no entry here is not distance-checked: the point of a region, country or
+# continent page says little about where inside it a listing should be, and itineraries and
+# topics have no single place. Invalid and missing coordinates are flagged for every page type.
+#
+# Every number below was read off the real distance percentiles of India (Wikivoyage dump
+# 20261101, 20,474 listings; the table is in report.md and detail-IN.md under "Distance from the
+# page's own geo, by page type"). Change a number only together with its reason, and bump
+# rules_version. The code has nothing country-specific in it; the world run's table is the check
+# that these values are not too tight for large countries.
+
+rules_version = 1
+
+[coordinates.far_km.city]
+km = 100
+reason = """India city pages: median 2.4 km, p95 24.8 km, p99 61.5 km. Above 100 km are 27 of \
+6,747 listings (0.4%); read by hand they are partly real places that serve the city from far \
+away (airports listed under Get in) and partly wrong coordinates (a dam 330 km from its page), \
+which is what the flag is for."""
+
+[coordinates.far_km.district]
+km = 30
+reason = """India district pages: p95 12.5 km, p99 16.0 km. Only 7 of 1,985 listings are above \
+25 km, and 2 above 50 km, so 30 km leaves the normal spread alone and catches the outliers."""
+
+[coordinates.far_km.park]
+km = 60
+reason = """India park pages (226 listings): p95 32.3 km, then nothing between 50 km and 175 km; \
+the 9 listings above 50 km are all at least 175 km away (a temple and a dam far outside the \
+park). 60 km sits inside the gap."""
+
+[coordinates.far_km.ruralarea]
+km = 100
+reason = """India rural-area pages (98 listings): p99 80.2 km and the largest is 80.2 km, so no \
+sample is above 100 km. Rural areas are wide, so the limit is kept loose until a bigger sample \
+(the world run) shows a better value."""
+
+[coordinates.far_km.airport]
+km = 25
+reason = """India airport pages (82 listings): p99 and the largest are both 9.1 km (taxis, \
+hotels and buses around the airport). 25 km is well beyond that."""

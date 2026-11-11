@@ -28,6 +28,9 @@ class CountryStats:
     price_age: Counter[str] = field(default_factory=Counter)
     hours_age: Counter[str] = field(default_factory=Counter)
     distances: dict[str, list[float]] = field(default_factory=dict)  # page type -> km
+    flags: Counter[str] = field(default_factory=Counter)
+    dup_basis: Counter[str] = field(default_factory=Counter)
+    gap: Counter[str] = field(default_factory=Counter)
     own: int = 0
     from_districts: int = 0
     owner_unresolved: int = 0
@@ -101,6 +104,51 @@ def distance_lines(by_type: Mapping[str, Sequence[float]]) -> list[str]:
     return [*lines, ""]
 
 
+GAP_ORDER = ("has_wikidata", "wikipedia_only", "neither")
+FLAG_ORDER = (
+    "coord_missing",
+    "coord_invalid",
+    "coord_unchecked",
+    "coord_far",
+    "name_missing",
+    "name_markup",
+    "url_invalid",
+    "email_invalid",
+    "wikidata_invalid",
+    "duplicate",
+    "same_place_as",
+)
+GAP_LABELS = {
+    "has_wikidata": "has a Wikidata ID",
+    "wikipedia_only": "a Wikipedia link only",
+    "neither": "neither",
+}
+
+
+def quality_lines(
+    flags: Mapping[str, int], dup_basis: Mapping[str, int], gap: Mapping[str, int], total: int
+) -> list[str]:
+    """Counts of quality flags and of the Wikidata gap. Flagged listings are kept as they are."""
+    lines = ["## Quality flags", "", f"Listings checked: {total}. A listing can carry several.", ""]
+    lines += ["| Flag | Listings | Share |", "|---|---|---|"]
+    for flag in FLAG_ORDER:
+        count = flags.get(flag, 0)
+        share = f"{100 * count / total:.2f}%" if total else "-"
+        lines.append(f"| {flag} | {count} | {share} |")
+    if dup_basis:
+        detail = ", ".join(f"{k} {dup_basis[k]}" for k in sorted(dup_basis))
+        lines += ["", f"Duplicates by basis: {detail}."]
+    without = sum(gap.values())
+    lines += ["", "## Listings without coordinates: what could fill them in", ""]
+    lines += [f"Listings without usable coordinates: {without}.", ""]
+    lines += ["| Group | Listings | Share |", "|---|---|---|"]
+    for group in GAP_ORDER:
+        count = gap.get(group, 0)
+        share = f"{100 * count / without:.1f}%" if without else "-"
+        lines.append(f"| {GAP_LABELS[group]} | {count} | {share} |")
+    return [*lines, ""]
+
+
 AGE_LABELS = (
     ("within", "within 2 years"),
     ("older", "older"),
@@ -170,6 +218,12 @@ def render_report(
     lines += freshness_lines(
         totals["price_age"], totals["hours_age"], totals["price_status"], totals["hours_status"]
     )
+    lines += quality_lines(
+        totals["quality_flags"],
+        totals["duplicates_by_basis"],
+        totals["wikidata_gap"],
+        totals["listings"],
+    )
     merged: dict[str, list[float]] = {}
     for country in stats.values():
         for page_type, values in country.distances.items():
@@ -208,6 +262,7 @@ def render_detail(iso: str, stats: CountryStats, *, dump_date: str) -> str:
     lines += freshness_lines(
         stats.price_age, stats.hours_age, stats.price_status, stats.hours_status
     )
+    lines += quality_lines(stats.flags, stats.dup_basis, stats.gap, stats.total)
     lines += distance_lines(stats.distances)
     return "\n".join(lines)
 
