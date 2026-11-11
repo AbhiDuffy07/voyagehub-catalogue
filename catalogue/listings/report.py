@@ -20,6 +20,11 @@ class CountryStats:
     by_section: Counter[str] = field(default_factory=Counter)
     by_region: Counter[str] = field(default_factory=Counter)
     lastedit_years: Counter[str] = field(default_factory=Counter)
+    lastedit_status: Counter[str] = field(default_factory=Counter)
+    price_status: Counter[str] = field(default_factory=Counter)
+    hours_status: Counter[str] = field(default_factory=Counter)
+    price_age: Counter[str] = field(default_factory=Counter)
+    hours_age: Counter[str] = field(default_factory=Counter)
     own: int = 0
     from_districts: int = 0
     owner_unresolved: int = 0
@@ -65,6 +70,40 @@ def counts_by_country_rows(stats: Mapping[str, CountryStats]) -> tuple[list[str]
     return header, rows
 
 
+AGE_LABELS = (
+    ("within", "within 2 years"),
+    ("older", "older"),
+    ("unclear", "unclear (the year straddles the cutoff)"),
+    ("undated", "undated (missing, unreadable or implausible)"),
+)
+
+
+def freshness_lines(
+    price_age: Mapping[str, int],
+    hours_age: Mapping[str, int],
+    price_status: Mapping[str, int],
+    hours_status: Mapping[str, int],
+) -> list[str]:
+    """The numbers behind the two-year rule for prices and hours (decided later, not here).
+    Age is measured from the dump date; a value with no usable `lastedit` is `undated`."""
+    lines: list[str] = []
+    for title, ages, status in (
+        ("Prices", price_age, price_status),
+        ("Hours", hours_age, hours_status),
+    ):
+        total = sum(ages.values())
+        lines += [f"## {title}: how old is the last edit", ""]
+        lines += [f"Listings with a {title.lower()[:-1]} text: {total}.", ""]
+        lines += ["| Last edit | Listings | Share |", "|---|---|---|"]
+        for key, label in AGE_LABELS:
+            count = ages.get(key, 0)
+            share = f"{100 * count / total:.1f}%" if total else "-"
+            lines.append(f"| {label} | {count} | {share} |")
+        read = ", ".join(f"{k} {status[k]}" for k in sorted(status) if k != "empty")
+        lines += ["", f"How well the text was read: {read or 'nothing to read'}.", ""]
+    return lines
+
+
 def render_report(
     totals: Mapping[str, Any],
     stats: Mapping[str, CountryStats],
@@ -96,7 +135,11 @@ def render_report(
     lines += ["", "## Largest owners (checks the 25 MiB Pages file limit later)", ""]
     lines += ["| Owner | Own page | From districts |", "|---|---|---|"]
     lines += [f"| {title} | {own} | {districts} |" for title, own, districts in largest]
-    return "\n".join(lines) + "\n"
+    lines.append("")
+    lines += freshness_lines(
+        totals["price_age"], totals["hours_age"], totals["price_status"], totals["hours_status"]
+    )
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def _table(
@@ -126,6 +169,9 @@ def render_detail(iso: str, stats: CountryStats, *, dump_date: str) -> str:
     _table(lines, "By owner status", "Status", stats.by_owner_status)
     _table(lines, "By section", "Section", stats.by_section)
     _table(lines, "By last edit year", "Year", stats.lastedit_years, sorted(stats.lastedit_years))
+    lines += freshness_lines(
+        stats.price_age, stats.hours_age, stats.price_status, stats.hours_status
+    )
     return "\n".join(lines)
 
 

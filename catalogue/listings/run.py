@@ -20,8 +20,10 @@ from catalogue.discover.parse import DumpPage, iter_pages
 from catalogue.discover.slugs import RegistryEntry, load_registry
 from catalogue.errors import PipelineError
 from catalogue.listings import report
+from catalogue.listings.interpret import Interpreted, interpret
 from catalogue.listings.keys import KEY_VERSION, KeyInput, assign_keys, key_slug
 from catalogue.listings.output import SCHEMA_VERSION, SortedJsonl, provenance
+from catalogue.listings.reference import Reference, load_reference
 from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
 from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
@@ -80,6 +82,12 @@ class _Tally:
         self.failures: list[tuple[int, str, str]] = []
         self.by_kind: Counter[str] = Counter()
         self.by_role: Counter[str] = Counter()
+        self.price_samples: list[tuple[str, int, int, str]] = []  # reason, page, ordinal, text
+        self.price_status: Counter[str] = Counter()
+        self.hours_status: Counter[str] = Counter()
+        self.lastedit_status: Counter[str] = Counter()
+        self.price_age: Counter[str] = Counter()
+        self.hours_age: Counter[str] = Counter()
         self.pages_read = 0
         self.marker_listings = 0
         self.pages_not_in_articles = 0
@@ -99,7 +107,7 @@ class _PageRows:
     listings: list[dict[str, Any]]
     markers: list[dict[str, Any]]
     key_inputs: list[KeyInput]
-    counted: list[tuple[RawListing, str]]  # listing, the section it sits under
+    counted: list[tuple[RawListing, str, Interpreted]]  # listing, its section, what was read
     owner: Owner | None
     region: str
     marker_listings: int = 0
@@ -112,8 +120,10 @@ def _build_page(
     slugs: dict[int, RegistryEntry],
     dump_date: str,
     read_at: str,
+    reference: Reference,
 ) -> _PageRows:
     content = parse_page(dump_page.text)
+    dump_day = date.fromisoformat(f"{dump_date[:4]}-{dump_date[4:6]}-{dump_date[6:]}")
     owner = resolve_owner(row, by_title)
     slug = slugs[owner.page_id].slug if owner and owner.page_id in slugs else ""
     page_fields = {
@@ -164,6 +174,9 @@ def _build_page(
         for listing in items:
             ordinal += 1
             fields = listing.fields
+            read = interpret(
+                fields, country_iso=row["tree_country_iso"], reference=reference, dump_day=dump_day
+            )
             base = f"{listing.kind}:{key_slug(fields['name'])}"
             built.key_inputs.append(
                 KeyInput(
@@ -182,6 +195,7 @@ def _build_page(
                     **page_fields,
                     **prov,
                     **fields,
+                    **read.fields,
                     "kind": listing.kind,
                     "listing_type": listing.listing_type,
                     "extra": listing.extra,
@@ -199,7 +213,7 @@ def _build_page(
                     "via_district": owner.via_district if owner else False,
                 }
             )
-            built.counted.append((listing, section.key))
+            built.counted.append((listing, section.key, read))
     return built
 
 
@@ -214,7 +228,9 @@ def run_fetch_listings(
     country_iso: str | None = None,
     detail_countries: Sequence[str] = (),
     proving_titles: Sequence[str] = (),
+    reference: Reference | None = None,
 ) -> ListingsResult:
+    reference = reference if reference is not None else load_reference()
     country_filter = country_iso.upper() if country_iso else None
     dump_sha1 = _verify_dump(dump_path, discover_folder)
     articles_path = discover_folder / "articles.jsonl"
@@ -248,7 +264,7 @@ def run_fetch_listings(
             if country_filter and row["tree_country_iso"] != country_filter:
                 continue
             try:
-                built = _build_page(dump_page, row, by_title, slugs, dump_date, read_at)
+                built = _build_page(dump_page, row, by_title, slugs, dump_date, read_at, reference)
             except Exception as exc:  # noqa: BLE001
                 # One unreadable page must not stop a world run. It is counted, listed by ID,
                 # title and error class (never the message, which could quote page text) in
@@ -265,7 +281,7 @@ def run_fetch_listings(
             for marker_row in built.markers:
                 markers_out.add(marker_row)
             tally.key_inputs.extend(built.key_inputs)
-            for listing, section_key in built.counted:
+            for listing, section_key, read in built.counted:
                 _count(
                     tally,
                     stats,
@@ -275,7 +291,10 @@ def run_fetch_listings(
                     built.owner,
                     row["role"],
                     today,
+                    read,
                 )
+            for listing_row in built.listings:
+                _sample_price(tally, listing_row)
 
         keys = assign_keys(tally.key_inputs)
         listings_out.finish(
@@ -296,7 +315,13 @@ def run_fetch_listings(
         "owner_unresolved": tally.owner_unresolved,
         "by_kind": dict(tally.by_kind),
         "by_role": dict(tally.by_role),
+        "price_status": dict(tally.price_status),
+        "hours_status": dict(tally.hours_status),
+        "lastedit_status": dict(tally.lastedit_status),
+        "price_age": dict(tally.price_age),
+        "hours_age": dict(tally.hours_age),
     }
+    _write_price_samples(target, tally, keys)
     _write_reports(
         target,
         totals,
@@ -329,12 +354,24 @@ def run_fetch_listings(
     return ListingsResult(output_dir=target, totals=totals, owner_counts=tally.owner_counts)
 
 
-def _count(tally, stats, listing, section_key, region, owner, role, today) -> None:
+def _count(tally, stats, listing, section_key, region, owner, role, today, read) -> None:
     tally.by_kind[listing.kind] += 1
     tally.by_role[role] += 1
     stats.by_kind[listing.kind] += 1
     stats.by_section[section_key] += 1
     stats.by_region[region] += 1
+    tally.lastedit_status[read.lastedit_status] += 1
+    stats.lastedit_status[read.lastedit_status] += 1
+    tally.price_status[read.price_status] += 1
+    stats.price_status[read.price_status] += 1
+    tally.hours_status[read.hours_status] += 1
+    stats.hours_status[read.hours_status] += 1
+    if read.price_status != "empty":
+        tally.price_age[read.age] += 1
+        stats.price_age[read.age] += 1
+    if read.hours_status != "empty":
+        tally.hours_age[read.age] += 1
+        stats.hours_age[read.age] += 1
     bucket = report.lastedit_bucket(listing.fields["lastedit"], latest_year=today.year)
     stats.lastedit_years[bucket] += 1
     if owner is None:
@@ -350,6 +387,26 @@ def _count(tally, stats, listing, section_key, region, owner, role, today) -> No
     else:
         stats.own += 1
         counts["own"] += 1
+
+
+def _sample_price(tally: _Tally, row: dict[str, Any]) -> None:
+    if row["price_status"] in ("unparsed", "partial"):
+        reason = f"{row['price_status']}:{row['price_reason']}"
+        tally.price_samples.append((reason, row["page_id"], row["ordinal"], row["price"]))
+
+
+def _write_price_samples(
+    target: Path, tally: _Tally, keys: dict[tuple[int, int], str], per_reason: int = 100
+) -> None:
+    """A review sample of prices not fully read: the first rows by page ID, per reason."""
+    kept: Counter[str] = Counter()
+    rows = []
+    for reason, page_id, ordinal, text in sorted(tally.price_samples):
+        if kept[reason] < per_reason:
+            kept[reason] += 1
+            rows.append([reason, page_id, keys[(page_id, ordinal)], text])
+    header = ["reason", "page_id", "listing_key", "price"]
+    write_text(target / "prices_unparsed.csv", _csv_text(header, rows))
 
 
 def _write_reports(
