@@ -1,13 +1,14 @@
 """Stable listing keys: the future database upsert key of a listing (`wikivoyage_listing_key`).
 
-A key is `<kind>:<key_slug(name)>`. `key_slug` keeps the letters, digits and combining marks of every
-script (NFKC, case-folded), so a name in Hindi, Chinese or Danish keeps its own key instead of
-collapsing to `unnamed`. A name longer than `MAX_SLUG_LENGTH` characters is cut and ends in a hash of
-the whole name. `KEY_VERSION` 2 is this scheme; version 1 (ASCII only, B3a) was never loaded.
+A key is `<kind>:<key_slug(name)>`. `key_slug` keeps the letters, digits and combining marks of
+every script (NFKC, case-folded), so a name in Hindi, Chinese or Danish keeps its own key instead
+of collapsing to `unnamed`. A name longer than `MAX_SLUG_LENGTH` characters is cut and ends in a
+hash of the whole name. `KEY_VERSION` 2 is this scheme; version 1 (ASCII only, B3a) was never
+loaded.
 
- Wikivoyage listings have no ID, so a name used more than once
-under one owner (a city plus its districts) is told apart by what the listing itself says, never by
-the order the dump happens to be read in:
+Wikivoyage listings have no ID, so a name used more than once under one owner (a city plus its
+districts) is told apart by what the listing itself says, never by the order the dump happens to
+be read in:
 
 1. its Wikidata ID, else
 2. a short hash of its coordinates rounded to 4 decimals (about 11 m), else

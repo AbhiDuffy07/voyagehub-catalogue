@@ -26,7 +26,6 @@ from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
 from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
 
-
 # Typed markers on these page types are real places on the rendered page, so they become listings.
 MARKER_LISTING_PAGE_TYPES = frozenset({"city", "district", "park"})
 
