@@ -1,0 +1,11 @@
+# Wikidata class (P31) -> place kind, for enrich-wikidata (B4). Global: nothing here is
+# country-specific. A class that is not listed gives no kind (the place keeps its raw P31 values
+# and the commonest unmapped classes are listed in kind_unmapped.csv).
+#
+# Every Q-ID below was read from a real run's kind_unmapped.csv and its English label checked
+# against live Wikidata before it was added. Allowed kinds: sight, museum, religious, fort_palace,
+# park_nature, market, viewpoint, neighbourhood, activity. ("other" is what an unmapped place is.)
+#
+# Not filled in yet: the first India run decides which classes matter.
+
+[kinds]
