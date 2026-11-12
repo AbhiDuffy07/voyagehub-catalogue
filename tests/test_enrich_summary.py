@@ -9,6 +9,7 @@ from catalogue.enrich.summary import (
     attribution,
     fetch_summaries,
     first_paragraph,
+    has_extract_gap,
     history_url,
     load_summary_rules,
     permalink,
@@ -67,6 +68,26 @@ def test_attribution_names_the_article_the_licence_and_that_it_is_an_excerpt():
     assert '"Amer Fort"' in text and "Wikipedia contributors" in text
     assert "CC BY-SA 4.0" in text and "excerpt" in text
     assert ATTRIBUTION_TEXT in text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Agra (; Hindi: x) is a city.", True),
+        ("Gol Gumbaz (; lit. 'Round Dome') is a tomb.", True),
+        ("Place (, a village) is small.", True),
+        ("Place () is small.", True),
+        ("Place ( ) is small.", True),
+        ("Thing (see a, ) here.", True),
+        ("Kochi ( KOH-chee, Malayalam: x) is a port.", False),
+        ("Person (born 1950) is a poet.", False),
+        ("Pair (1, 2) is two numbers.", False),
+        ("No brackets at all, only commas; and semicolons.", False),
+        ("", False),
+    ],
+)
+def test_a_gap_left_by_removed_pronunciation_markup_is_detected(text, expected):
+    assert has_extract_gap(text) is expected
 
 
 # --- fetching -----------------------------------------------------------------------------------

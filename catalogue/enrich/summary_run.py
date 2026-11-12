@@ -31,6 +31,7 @@ from catalogue.enrich.summary import (
     attribution,
     fetch_summaries,
     first_paragraph,
+    has_extract_gap,
     history_url,
     load_summary_rules,
     permalink,
@@ -162,6 +163,8 @@ def _row(
         lead = page.extract
         if len(lead) < rules.very_short_chars:
             flags.append("very_short")
+        if has_extract_gap(lead):
+            flags.append("extract_gap")
     if page.redirected:
         flags.append("redirected")
     title = page.title

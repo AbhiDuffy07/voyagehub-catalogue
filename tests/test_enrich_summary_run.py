@@ -295,3 +295,20 @@ def test_a_bad_dump_date_is_a_clear_error(client, enrich_folder, tmp_path):
             country_iso="IN",
             rules=RULES,
         )
+
+
+def test_a_gap_from_removed_pronunciation_markup_is_flagged_and_the_text_is_not_changed(
+    client, tmp_path
+):
+    text = "Agra (; Hindi: Agra) is a city on the banks of the Yamuna river in Uttar Pradesh."
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101-IN",
+        destinations=[destination_row(1, "Agra", enwiki="Agra")],
+        listings=[],
+    )
+    with respx.mock:
+        respx.get(ENWIKI).mock(side_effect=fake_wikipedia_summaries({"Agra": wiki(text, 7)}))
+        done = run(client, folder, tmp_path)
+    row = jsonl(done.output_dir / "summaries.jsonl")[0]
+    assert row["flags"] == ["extract_gap"]
+    assert row["lead_text"] == text

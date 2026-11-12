@@ -12,6 +12,7 @@ attribution that says it is an excerpt. Nothing is rewritten: the stored text is
 returned, and `first_paragraph` only cuts it at a line break.
 """
 
+import re
 import tomllib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -30,6 +31,9 @@ MAX_REDIRECT_HOPS = 5
 LICENCE = "CC BY-SA 4.0"
 LICENCE_URL = "https://creativecommons.org/licenses/by-sa/4.0/"
 ATTRIBUTION_TEXT = "Wikipedia contributors"
+# What Wikipedia's extract generator leaves behind when it strips a pronunciation or audio
+# template: "Agra (; Hindi: ...)", "Place ()", "Place (, a village)".
+_GAP = re.compile(r"\(\s*[;,]|\(\s*\)|[;,]\s*\)")
 SUMMARY_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "summary_rules.toml"
 
 
@@ -64,6 +68,12 @@ def history_url(title: str) -> str:
 
 def attribution(title: str) -> str:
     return f'From the Wikipedia article "{title}" by {ATTRIBUTION_TEXT}, {LICENCE} (excerpt)'
+
+
+def has_extract_gap(text: str) -> bool:
+    """True when the text has an empty or dangling bracket, the trace of removed markup. It is
+    only reported: the text is stored exactly as the API returned it."""
+    return _GAP.search(text) is not None
 
 
 def first_paragraph(text: str) -> str:
