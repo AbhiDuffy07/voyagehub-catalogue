@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and two jobs work: `discover` and `fetch-listings`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and three jobs work: `discover`, `fetch-listings` and `enrich-wikidata`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -53,6 +53,22 @@ What each listing row carries (nothing raw is dropped):
 - **Hours and last edit:** `hours_parsed` only when there is one reading (`3-8PM` yes, `9-5PM` no); `lastedit_*` keeps a year as a year.
 - **Quality flags (`quality_flags`):** coordinates missing, invalid, unchecked or far from the page's own point (limits per page type in `config/listing_quality.toml`, each with a written reason); malformed URL, email, name or Wikidata ID; duplicates inside one city (`duplicate_of`, `duplicate_basis`); the same place under two kinds (`same_place_as`). Listings are flagged, never dropped. `coord_gap` groups listings without coordinates by what could fill them in (a Wikidata ID, a Wikipedia link only, neither). Address text is never geocoded.
 - `report.md` and `detail-<CC>.md` also show how old the last edit is for priced and timed listings (the numbers behind the two-year rule, which is decided later), the quality counts and the distance percentiles.
+
+### `enrich-wikidata`
+
+```text
+.venv\Scripts\python -m catalogue enrich-wikidata --dump-date 20261101 --country IN --detail IN
+```
+
+Network (Wikivoyage, English Wikipedia and Wikidata Action APIs, through the polite client; needs `CONTACT_EMAIL`). Writes local files only to `out/enrich/<dump date>[-CC]/`. It reads `out/discover/<dump date>/` (always the whole world) and `out/listings/<dump date>[-CC]/`, and refuses to run unless the two belong together (hashes in the fetch-listings manifest). A country run only touches that country's articles. The console prints counts only.
+
+- **Wikidata IDs:** every article gets one (discover's, else Wikivoyage `pageprops`). A listing with only a `wikipedia=` link is resolved through English Wikipedia (title, `en:` prefix or URL); disambiguation pages, missing pages, section links, other languages and pages without an item are never resolved (`wikipedia_links.csv` lists every outcome).
+- **Coordinates:** the page's own Wikivoyage point always wins and is never changed. Wikidata fills only a place with no usable point, and only for exactly one Earth coordinate whose country (P17) matches, that is not a destination's own item, and that is within the page type's `far_km` limit (the same limits as `config/listing_quality.toml`). Otherwise the coordinate stays empty, the Wikidata value is kept beside it, and a flag says why (`wikidata_coord_far`, `wikidata_country_disagrees`, `country_unconfirmed`, `item_is_destination`, `multiple_coordinates`, `no_p625`, `not_earth`, `invalid_wikidata_coordinate`, `no_wikidata_id`, `bad_wikidata_id`, `item_missing`, `item_merged`). A `{{geo}}` that is present but invalid counts as no usable point (`own_geo_invalid`). Where both sources have a point, a distance over `config/enrich_rules.toml` is flagged `wikidata_coord_disagrees`; neither point is changed.
+- **UNESCO:** `is_unesco` needs both the World Heritage designation (P1435 = Q9259) and a World Heritage ID (P757); one without the other is flagged `unesco_inconsistent`. A component of a serial site (marked "part of UNESCO World Heritage Site", Q43113623) is kept apart as `unesco_component` and is not `is_unesco`. All designations are counted by country in `heritage_designations.csv`. The run stops if either Q-ID's label on Wikidata changes.
+- **Kind:** `config/kind_map.toml` maps Wikidata classes (P31) to place kinds. A place whose classes map to two kinds gets none and `kind_ambiguous`. `kind_unmapped.csv` lists the commonest classes still unmapped.
+- **Time zone (destinations):** the place's own single IANA zone, else the country's single zone labelled `country_single_zone`, else empty with a flag.
+- **Entry fees (P2555) are counted, never used:** `p2555_counts.csv` and `p2555_samples.csv` show how many attractions have a fee statement, how many are dated and how many are within 2 years. No fee value is in any facts file.
+- **Files:** `destination_facts.jsonl` (one row per article), `listing_facts.jsonl` (listings that have an item, or that have no usable point), the tables above, `coord_fill_by_country.csv` and `flags_by_country.csv` (coordinates before and after, by country), `report.md`, `detail-<CC>.md` and `manifest.json`. Every row carries its Wikidata source, revision and CC0 licence.
 
 Settings come from environment variables (names only in [.env.example](.env.example)); a local `.env` file is read when present. Nothing secret is ever committed.
 
