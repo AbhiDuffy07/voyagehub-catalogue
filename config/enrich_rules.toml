@@ -9,7 +9,11 @@ rules_version = 1
 
 [coordinates.disagreement]
 km = 25
-reason = """PROVISIONAL, to be set from the India run's real distances. When a place has both a \
-Wikivoyage point and a Wikidata point, they are normally within a few hundred metres; further \
-apart than this they are flagged `wikidata_coord_disagrees` for review. The Wikivoyage point is \
-kept either way. Report-only: it never changes a coordinate."""
+reason = """When a place has both a Wikivoyage point and a Wikidata point, they are normally \
+within a few hundred metres; further apart than this they are flagged \
+`wikidata_coord_disagrees` for review. The Wikivoyage point is kept either way. Report-only: \
+it never changes a coordinate. Read off the India run (dump 20261101): of 3,498 listings that \
+have both points, the median distance is 0 km, p95 0.6 km, p99 15.7 km, and 29 (0.8%) are \
+above 25 km. Of 1,081 destinations, median 0.14 km, p95 13.5 km, p99 49.4 km, and 38 (3.5%) \
+are above 25 km (a town's centre point is looser than a building's). PROVISIONAL until the \
+world run's table confirms 25 km is not too tight for large countries."""

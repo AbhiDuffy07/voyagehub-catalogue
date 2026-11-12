@@ -28,6 +28,7 @@ from catalogue.enrich import report
 from catalogue.enrich.claims import ItemFacts
 from catalogue.enrich.coords import CoordDecision, country_check, decide_coordinate
 from catalogue.enrich.facts import (
+    PART_OF_WORLD_HERITAGE_SITE,
     WORLD_HERITAGE_SITE,
     fee_summary,
     kind_of,
@@ -59,7 +60,10 @@ LICENCE_URL = "https://creativecommons.org/publicdomain/zero/1.0/"
 ATTRIBUTION = "Wikidata contributors"
 DESTINATION_ROLES = frozenset({"destination", "destination_outline"})
 FEE_KINDS = frozenset({"see", "do"})
-EXPECTED_LABELS = {WORLD_HERITAGE_SITE: "World Heritage Site"}
+EXPECTED_LABELS = {
+    WORLD_HERITAGE_SITE: "World Heritage Site",
+    PART_OF_WORLD_HERITAGE_SITE: "part of UNESCO World Heritage Site",
+}
 NO_COUNTRY = "(none)"
 
 
@@ -122,11 +126,13 @@ def _item_fields(
 ) -> tuple[dict[str, Any], list[str]]:
     """The facts every row carries when it has an item, and the flags found while reading them."""
     flags: list[str] = []
-    is_unesco, unesco_flags = unesco_status(item)
+    unesco = unesco_status(item)
     kind, kind_flags = kind_of(item, kind_map)
-    flags += [*unesco_flags, *kind_flags]
+    flags += [*unesco.flags, *kind_flags]
     if item is not None:
-        tally.unesco["unesco" if is_unesco else "not_unesco"] += 1
+        tally.unesco[
+            "unesco" if unesco.is_unesco else "component" if unesco.component else "no"
+        ] += 1
         for designation in item.heritage:
             tally.heritage[(key_country or NO_COUNTRY, designation)].add(item.qid)
         if kind is None:
@@ -134,7 +140,8 @@ def _item_fields(
                 if cls not in kind_map:
                     tally.unmapped[cls].add(item.qid)
     fields = {
-        "is_unesco": is_unesco,
+        "is_unesco": unesco.is_unesco,
+        "unesco_component": unesco.component,
         "heritage": list(item.heritage) if item else [],
         "instance_of": list(item.instance_of) if item else [],
         "kind": kind,

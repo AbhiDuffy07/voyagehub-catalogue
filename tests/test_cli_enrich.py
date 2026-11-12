@@ -52,6 +52,7 @@ def api():
         "Q668": entity({}),
         "Q100": entity({"P17": [item_claim("Q668")], "P625": [coordinate_claim(26.99, 75.85)]}),
         "Q9259": entity({}, label="World Heritage Site"),
+        "Q43113623": entity({}, label="part of UNESCO World Heritage Site"),
     }
     with respx.mock:
         respx.get(WV).mock(side_effect=fake_wikivoyage({}))

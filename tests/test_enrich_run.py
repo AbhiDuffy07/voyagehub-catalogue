@@ -26,6 +26,7 @@ ENWIKI = "https://en.wikipedia.org/w/api.php"
 WIKIDATA = "https://www.wikidata.org/w/api.php"
 TODAY = date(2026, 11, 12)
 INDIA, PAKISTAN, TZ_ITEM, RUPEE, WHS = "Q668", "Q843", "Q9001", "Q9002", "Q9259"
+PART_OF = "Q43113623"
 FORT_CLASS = "Q9101"
 KIND_MAP = {FORT_CLASS: "fort_palace"}
 
@@ -53,6 +54,7 @@ LISTINGS = [
     listing(1, 9, "Plain Cafe", kind="eat", lat="26.9", long="75.8"),
     listing(1, 10, "Lost Shop", kind="buy"),
     listing(1, 11, "Merged", wikidata="Q50"),
+    listing(1, 12, "Component Fort", wikidata="Q105", lat="26.9", long="75.8"),
 ]
 
 
@@ -94,6 +96,8 @@ ENTITIES = {
     RUPEE: entity({"P498": [string_claim("INR")]}, label="Indian rupee"),
     FORT_CLASS: entity({}, label="fort"),
     WHS: entity({}, label="World Heritage Site"),
+    PART_OF: entity({}, label="part of UNESCO World Heritage Site"),
+    "Q105": entity(in_india(("P1435", [item_claim(PART_OF)]), ("P757", [string_claim("247")]))),
 }
 
 
@@ -301,7 +305,13 @@ def test_fee_statements_are_only_counted(result):
 def test_heritage_and_unmapped_class_reports(result):
     heritage = table(result.output_dir / "heritage_designations.csv")
     assert heritage == [
-        {"country_iso": "IN", "designation_qid": WHS, "label": "World Heritage Site", "items": "1"}
+        {
+            "country_iso": "IN",
+            "designation_qid": PART_OF,
+            "label": "part of UNESCO World Heritage Site",
+            "items": "1",
+        },
+        {"country_iso": "IN", "designation_qid": WHS, "label": "World Heritage Site", "items": "1"},
     ]
     unmapped = table(result.output_dir / "kind_unmapped.csv")
     assert unmapped == []  # the only class in the data is mapped
@@ -411,3 +421,18 @@ def test_a_country_run_ignores_articles_of_other_countries(client, tmp_path):
     rows = jsonl(done.output_dir / "destination_facts.jsonl")
     assert {r["title"] for r in rows} == {"Jaipur", "Abhaneri"}
     assert done.totals["articles"] == 2
+
+
+def test_a_component_of_a_world_heritage_site_is_marked_apart(result):
+    row = listings(result)[(1, 12)]
+    assert row["unesco_component"] is True and row["is_unesco"] is False
+    assert row["flags"] == []
+    assert listings(result)[(1, 1)]["unesco_component"] is False
+
+
+def test_a_changed_part_of_label_stops_the_run(client, folders, tmp_path):
+    wrong = {**ENTITIES, PART_OF: entity({}, label="Something else")}
+    with respx.mock:
+        mock_all(entities=wrong)
+        with pytest.raises(PipelineError, match=PART_OF):
+            run(client, folders, tmp_path)

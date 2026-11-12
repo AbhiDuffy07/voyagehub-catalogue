@@ -9,23 +9,37 @@ from datetime import date
 
 from catalogue.enrich.claims import ItemFacts
 
-WORLD_HERITAGE_SITE = "Q9259"  # label checked against live Wikidata at the start of every run
+WORLD_HERITAGE_SITE = "Q9259"  # labels checked against live Wikidata at the start of every run
+PART_OF_WORLD_HERITAGE_SITE = "Q43113623"
 FRESH_YEARS = 2  # the design's 2-year rule for prices, applied to counting only
 
 
-def unesco_status(item: ItemFacts | None) -> tuple[bool, tuple[str, ...]]:
-    """True only when the item has the World Heritage designation (P1435) AND a World Heritage ID
-    (P757). Having just one of them is flagged and is not enough: a mistake in either would
-    otherwise decide the UNESCO badge."""
+@dataclass(frozen=True, slots=True)
+class UnescoStatus:
+    is_unesco: bool  # the item is itself a World Heritage Site
+    component: bool  # the item is marked as part of one (a serial site's component)
+    flags: tuple[str, ...]
+
+
+def unesco_status(item: ItemFacts | None) -> UnescoStatus:
+    """`is_unesco` is true only when the item has the World Heritage designation (P1435) AND a
+    World Heritage ID (P757); having just one is flagged and is not enough, so a mistake in either
+    cannot decide the badge.
+
+    A component of a serial site (Amber Fort, one of the Hill Forts of Rajasthan) is marked "part
+    of UNESCO World Heritage Site" instead. That is kept apart as `component`, never folded into
+    `is_unesco`: whether a component earns the badge is the owner's call. A component may carry
+    the site's ID without a flag."""
     if item is None:
-        return False, ()
+        return UnescoStatus(False, False, ())
     designated = WORLD_HERITAGE_SITE in item.heritage
+    component = PART_OF_WORLD_HERITAGE_SITE in item.heritage and not designated
     identified = bool(item.whc_ids)
     if designated and identified:
-        return True, ()
-    if designated or identified:
-        return False, ("unesco_inconsistent",)
-    return False, ()
+        return UnescoStatus(True, False, ())
+    if designated or (identified and not component):
+        return UnescoStatus(False, False, ("unesco_inconsistent",))
+    return UnescoStatus(False, component, ())
 
 
 def kind_of(

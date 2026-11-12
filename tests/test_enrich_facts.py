@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from catalogue.enrich.claims import parse_item
-from catalogue.enrich.facts import fee_summary, kind_of, timezone_of, unesco_status
+from catalogue.enrich.facts import UnescoStatus, fee_summary, kind_of, timezone_of, unesco_status
 from catalogue.enrich.kindmap import load_kind_map
 from catalogue.errors import PipelineError
 from tests.apifakes import (
@@ -22,31 +22,59 @@ def item(claims=None, qid="Q1"):
 
 # --- UNESCO -------------------------------------------------------------------------------------
 
+PART_OF = "Q43113623"  # "part of UNESCO World Heritage Site"
+
 
 def test_unesco_needs_the_world_heritage_designation_and_an_id():
     both = item({"P1435": [item_claim("Q9259")], "P757": [string_claim("252")]})
-    assert unesco_status(both) == (True, ())
+    assert unesco_status(both) == UnescoStatus(True, False, ())
 
 
 def test_no_designation_and_no_id_is_plainly_not_unesco():
-    assert unesco_status(item({})) == (False, ())
-    assert unesco_status(item({"P1435": [item_claim("Q123")]})) == (False, ())
+    assert unesco_status(item({})) == UnescoStatus(False, False, ())
+    assert unesco_status(item({"P1435": [item_claim("Q123")]})) == UnescoStatus(False, False, ())
 
 
 def test_designation_without_an_id_or_the_reverse_is_flagged_and_not_unesco():
     only_designation = item({"P1435": [item_claim("Q9259")]})
     only_id = item({"P757": [string_claim("252")]})
-    assert unesco_status(only_designation) == (False, ("unesco_inconsistent",))
-    assert unesco_status(only_id) == (False, ("unesco_inconsistent",))
+    assert unesco_status(only_designation) == UnescoStatus(False, False, ("unesco_inconsistent",))
+    assert unesco_status(only_id) == UnescoStatus(False, False, ("unesco_inconsistent",))
 
 
 def test_an_ended_designation_does_not_count():
     ended = item({"P1435": [item_claim_with_end("Q9259")], "P757": [string_claim("252")]})
-    assert unesco_status(ended) == (False, ("unesco_inconsistent",))
+    assert unesco_status(ended) == UnescoStatus(False, False, ("unesco_inconsistent",))
 
 
 def test_unknown_item_is_not_unesco_and_not_flagged():
-    assert unesco_status(None) == (False, ())
+    assert unesco_status(None) == UnescoStatus(False, False, ())
+
+
+def test_a_component_of_a_world_heritage_site_is_marked_apart_not_as_unesco():
+    # Amber Fort: Wikidata says "part of UNESCO World Heritage Site", not the site itself.
+    component = item({"P1435": [item_claim(PART_OF)]})
+    assert unesco_status(component) == UnescoStatus(False, True, ())
+
+
+def test_a_component_may_carry_the_world_heritage_id_without_a_flag():
+    component = item({"P1435": [item_claim(PART_OF)], "P757": [string_claim("247")]})
+    assert unesco_status(component) == UnescoStatus(False, True, ())
+
+
+def test_an_item_that_is_both_the_site_and_marked_part_of_is_the_site():
+    both = item(
+        {
+            "P1435": [item_claim("Q9259"), item_claim(PART_OF)],
+            "P757": [string_claim("247")],
+        }
+    )
+    assert unesco_status(both) == UnescoStatus(True, False, ())
+
+
+def test_an_ended_part_of_designation_is_not_a_component():
+    ended = item({"P1435": [item_claim_with_end(PART_OF)]})
+    assert unesco_status(ended) == UnescoStatus(False, False, ())
 
 
 # --- kind ---------------------------------------------------------------------------------------
