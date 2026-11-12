@@ -72,6 +72,19 @@ Network (Wikivoyage, English Wikipedia and Wikidata Action APIs, through the pol
 
 Settings come from environment variables (names only in [.env.example](.env.example)); a local `.env` file is read when present. Nothing secret is ever committed.
 
+### `derive-timezone`
+
+```text
+.venv\Scripts\python -m catalogue derive-timezone --dump-date 20261101
+```
+
+Offline and fast (seconds): no network, no settings. It reads `out/enrich/<dump date>[-CC]/` (its `destination_facts.jsonl`, checked against that run's manifest and country filter) and writes `out/timezones/<dump date>[-CC]/`. `destinations.timezone` cannot be empty, but after `enrich-wikidata` about 59% of destination rows had no zone, so B15 waits for this step.
+
+- **Where a zone comes from:** the destination's coordinates (its own point, or one filled from Wikidata), looked up in time-zone boundary data with the `tzfpy` package (exact pin in `requirements.txt`; MIT code, ODbL boundary data inside the wheel, no dependencies). Rows say `timezone_basis: coordinates` and carry the boundary data version.
+- **Never a guess:** a place's own Wikidata zone is kept and never replaced (a different offset is only flagged `timezone_disagrees`). A country's single zone, which `enrich-wikidata` uses as a labelled fallback, gives way to the coordinates when they give one clear zone (`timezone_replaced_country_zone`; Wikidata names `US/Eastern` as Canada's only zone). A point at sea (`Etc/GMT...`), outside every boundary, in two overlapping zones (a disputed border) or with a name the time-zone database does not know gets no zone and a flag (`timezone_no_land_zone`, `timezone_ambiguous`, `timezone_invalid_name`); no coordinate and no Wikidata zone gives `timezone_unknown`. Two names with the same UTC offsets (`Asia/Calcutta`, `Asia/Kolkata`) are not a disagreement.
+- **Credit, wherever zones are published:** "Time zones: timezone-boundary-builder, © OpenStreetMap contributors, ODbL". Only zone names are stored (no boundary data), and rows derived from coordinates carry this credit and the licence.
+- **Files:** `destination_timezones.jsonl` (one row per destination), `timezones_by_country.csv`, `timezone_disagreements.csv`, `report.md` and `manifest.json` (input hashes, `tzfpy` and data versions, output hashes).
+
 ## Known follow-ups
 
 Small items found in review of `fetch-listings`, not yet done:

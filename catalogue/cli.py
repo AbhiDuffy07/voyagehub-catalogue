@@ -1,7 +1,7 @@
 """Command line: `python -m catalogue <command>`.
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
-enrich-wikidata in B4; the rest arrive one by one in later sessions).
+enrich-wikidata and derive-timezone in B4; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -21,6 +21,7 @@ from catalogue.discover.overrides import load_country_iso_overrides
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.enrich.run import run_enrich_wikidata
+from catalogue.enrich.timezones import run_derive_timezone
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
@@ -109,6 +110,17 @@ def _parser() -> argparse.ArgumentParser:
         "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
     )
     enrich.add_argument("--out-dir", type=Path, default=Path("out/enrich"))
+
+    timezones = commands.add_parser(
+        "derive-timezone",
+        help="derive each destination's IANA time zone from its coordinates (offline)",
+    )
+    timezones.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    timezones.add_argument("--country", help="only this ISO country code (same as enrich-wikidata)")
+    timezones.add_argument(
+        "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
+    )
+    timezones.add_argument("--out-dir", type=Path, default=Path("out/timezones"))
 
     report = commands.add_parser(
         "report", help="write research files from the discover output (offline, no settings needed)"
@@ -247,6 +259,19 @@ def _enrich_wikidata(
     print(f"files: {result.output_dir}")
 
 
+def _derive_timezone(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    result = run_derive_timezone(
+        enrich_folder=args.enrich_dir / folder,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+    )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _wikivoyage_sitename(client: PoliteClient) -> str:
     response = client.get(SITEINFO_URL, params=SITEINFO_PARAMS)
     try:
@@ -302,6 +327,8 @@ def main(
             _report(args)
         elif args.command == "fetch-listings":
             _fetch_listings(args)
+        elif args.command == "derive-timezone":
+            _derive_timezone(args)
         elif args.command == "enrich-wikidata":
             _enrich_wikidata(args, environ, env_file, client_factory)
         else:
