@@ -227,13 +227,14 @@ def _enrich_wikidata(
     client_factory: Callable[[Settings], PoliteClient],
 ) -> None:
     settings = load_settings(environ, env_file)
-    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    # `discover` always writes the world folder; `fetch-listings --country` adds the suffix.
+    listings_folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     client = client_factory(settings)
     try:
         result = run_enrich_wikidata(
             client,
-            discover_folder=args.discover_dir / folder,
-            listings_folder=args.listings_dir / folder,
+            discover_folder=args.discover_dir / args.dump_date,
+            listings_folder=args.listings_dir / listings_folder,
             out_dir=args.out_dir,
             dump_date=args.dump_date,
             today=datetime.now(UTC).date(),

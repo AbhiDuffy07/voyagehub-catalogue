@@ -388,3 +388,26 @@ def test_a_detail_report_is_written_for_the_country(client, folders, tmp_path):
         done = run(client, folders, tmp_path, detail_countries=["IN"])
     assert "India" in (done.output_dir / "detail-IN.md").read_text(encoding="utf-8")
     assert "Coordinates" in (done.output_dir / "report.md").read_text(encoding="utf-8")
+
+
+@respx.mock
+def test_a_country_run_ignores_articles_of_other_countries(client, tmp_path):
+    seen: list[list[str]] = []
+    folders = write_inputs(
+        tmp_path / "in",
+        articles=[
+            article(1, "Jaipur", qid="Q10"),
+            article(2, "Abhaneri", role="destination_outline", status="outline"),
+            article(3, "Lahore", role="destination_outline", status="outline", iso="PK"),
+        ],
+        listings=[],
+        page_geo={2: ("", "")},
+    )
+    respx.get(WIKIVOYAGE).mock(side_effect=fake_wikivoyage({"Abhaneri": "Q20"}, seen=seen))
+    respx.get(WIKIDATA).mock(side_effect=fake_wikidata_full(ENTITIES))
+    respx.get(ENWIKI).mock(side_effect=fake_wikipedia({}))
+    done = run(client, folders, tmp_path)
+    assert [t for batch in seen for t in batch] == ["Abhaneri"]
+    rows = jsonl(done.output_dir / "destination_facts.jsonl")
+    assert {r["title"] for r in rows} == {"Jaipur", "Abhaneri"}
+    assert done.totals["articles"] == 2

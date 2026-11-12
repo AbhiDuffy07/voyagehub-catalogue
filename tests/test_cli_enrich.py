@@ -35,9 +35,13 @@ def folders(tmp_path):
         ],
         listings=[listing(1, 1, "Amber Fort", wikidata="Q100")],
     )
-    for name, folder in (("discover", discover), ("listings", listings)):
+    # Like the real jobs: discover always writes the world folder; fetch-listings adds -CC.
+    for name, folder, target in (
+        ("discover", discover, "20261101"),
+        ("listings", listings, "20261101-IN"),
+    ):
         (tmp_path / name).mkdir()
-        shutil.move(str(folder), str(tmp_path / name / "20261101-IN"))
+        shutil.move(str(folder), str(tmp_path / name / target))
     return tmp_path
 
 

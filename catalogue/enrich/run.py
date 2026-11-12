@@ -214,7 +214,13 @@ def run_enrich_wikidata(
     country_filter = country_iso.upper() if country_iso else None
 
     verify_inputs(discover_folder, listings_folder, country_filter=country_filter)
-    articles = read_articles(discover_folder)
+    # fetch-listings filters by country but discover's files are always the whole world, so an
+    # India run must not look up (or write facts for) any other country's articles.
+    articles = [
+        a
+        for a in read_articles(discover_folder)
+        if country_filter is None or a.tree_country_iso == country_filter
+    ]
     states = read_destination_states(discover_folder)
     page_geo = read_page_geo(listings_folder)
     listings = list(iter_listings(listings_folder))
