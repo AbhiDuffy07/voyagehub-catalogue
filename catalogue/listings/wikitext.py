@@ -92,6 +92,7 @@ class RawListing:
     fields: dict[str, str]
     extra: dict[str, str]
     repeated_params: tuple[str, ...] = ()
+    from_marker: bool = False  # built from a typed {{marker}}, so most fields are empty
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,7 @@ class Section:
     kind: str  # lead, prose, destination_list
     text: str
     listings: list[RawListing] = field(default_factory=list)
+    markers: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def listing_count(self) -> int:
@@ -112,6 +114,7 @@ class Section:
 class PageContent:
     sections: list[Section]
     markers: list[dict[str, str]]
+    geo: tuple[str, str] | None = None  # the page's own {{geo}}: (lat, long) as written, or None
 
 
 def section_key(heading: str) -> str:
@@ -165,6 +168,17 @@ def _marker(template: Template) -> dict[str, str]:
     return {name: values.get(name, "") for name in MARKER_FIELDS}
 
 
+def marker_listing(marker: dict[str, str]) -> RawListing | None:
+    """A typed marker (go, see, eat, ...) as a listing; None for untyped or other marker types."""
+    kind = marker["type"].strip().lower()
+    if kind not in KINDS or kind == "listing":
+        return None
+    fields = {name: "" for name in FIELDS}
+    fields.update(name=marker["name"], lat=marker["lat"], long=marker["long"])
+    fields["wikidata"] = marker["wikidata"]
+    return RawListing(kind, "", fields, {}, (), from_marker=True)
+
+
 def _heading_text(heading: Heading) -> str:
     return " ".join(heading.title.strip_code().split())
 
@@ -193,19 +207,32 @@ def _build_section(
 ) -> Section | None:
     code = Wikicode(nodes)
     listings: list[RawListing] = []
+    own_markers: list[dict[str, str]] = []
     for template in _walk(code):
         if _template_name(template) == "marker":
-            markers.append(_marker(template))
+            own_markers.append(_marker(template))
         else:
             listings.append(_listing(template))
+    markers.extend(own_markers)
     text = _plain_text(code)
     if heading is None:
-        if not text and not listings:
+        if not text and not listings and not own_markers:
             return None
-        return Section("", "lead", True, "lead", text, listings)
+        return Section("", "lead", True, "lead", text, listings, own_markers)
     key = section_key(heading)
     kind = "destination_list" if key in DESTINATION_LISTS else "prose"
-    return Section(heading, key, key in STANDARD_SECTIONS, kind, text, listings)
+    return Section(heading, key, key in STANDARD_SECTIONS, kind, text, listings, own_markers)
+
+
+def _page_geo(nodes: list) -> tuple[str, str] | None:
+    """The first {{geo|lat|long}}: positional values 1 and 2 (a third is the zoom), or named."""
+    for node in nodes:
+        if isinstance(node, Template) and _template_name(node) == "geo":
+            named = {str(p.name).strip().lower(): str(p.value).strip() for p in node.params}
+            lat = named.get("lat", named.get("1", ""))
+            long = named.get("long", named.get("2", ""))
+            return lat, long
+    return None
 
 
 def parse_page(text: str) -> PageContent:
@@ -226,4 +253,4 @@ def parse_page(text: str) -> PageContent:
     section = _build_section(heading, current, markers)
     if section is not None:
         sections.append(section)
-    return PageContent(sections, markers)
+    return PageContent(sections, markers, _page_geo(nodes))

@@ -1,8 +1,14 @@
 """Stable listing keys: the future database upsert key of a listing (`wikivoyage_listing_key`).
 
-A key is `<kind>:<slugified name>`. Wikivoyage listings have no ID, so a name used more than once
-under one owner (a city plus its districts) is told apart by what the listing itself says, never by
-the order the dump happens to be read in:
+A key is `<kind>:<key_slug(name)>`. `key_slug` keeps the letters, digits and combining marks of
+every script (NFKC, case-folded), so a name in Hindi, Chinese or Danish keeps its own key instead
+of collapsing to `unnamed`. A name longer than `MAX_SLUG_LENGTH` characters is cut and ends in a
+hash of the whole name. `KEY_VERSION` 2 is this scheme; version 1 (ASCII only, B3a) was never
+loaded.
+
+Wikivoyage listings have no ID, so a name used more than once under one owner (a city plus its
+districts) is told apart by what the listing itself says, never by the order the dump happens to
+be read in:
 
 1. its Wikidata ID, else
 2. a short hash of its coordinates rounded to 4 decimals (about 11 m), else
@@ -19,12 +25,15 @@ re-edited listing gets a new key. There is no ID in the source to avoid that.
 
 import hashlib
 import re
+import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import NamedTuple
 
-_WIKIDATA = re.compile(r"Q[0-9]+")
-_NOT_ALNUM = re.compile(r"[^a-z0-9]+")
+_WIKIDATA = re.compile(r"Q[1-9][0-9]*")
+KEY_VERSION = 2
+MAX_SLUG_LENGTH = 80
+_HASH_LENGTH = 8
 
 
 class KeyInput(NamedTuple):
@@ -39,7 +48,26 @@ class KeyInput(NamedTuple):
 
 
 def _short_hash(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]  # noqa: S324 (a label, not security)
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()  # noqa: S324 (a label, not security)
+    return digest[:_HASH_LENGTH]
+
+
+def words(text: str) -> list[str]:
+    """NFKC, case-folded words made of letters, digits and combining marks (any script)."""
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    kept = "".join(c if unicodedata.category(c)[0] in "LNM" else " " for c in folded)
+    return kept.split()
+
+
+def key_slug(name: str) -> str:
+    """The name part of a listing key. Empty or unreadable names give `unnamed`."""
+    slug = "-".join(words(name))
+    if not slug:
+        return "unnamed"
+    if len(slug) > MAX_SLUG_LENGTH:
+        head = slug[: MAX_SLUG_LENGTH - _HASH_LENGTH - 1].rstrip("-")
+        slug = f"{head}-{_short_hash(slug)}"
+    return slug
 
 
 def _coordinate_label(lat: str, long: str) -> str:
@@ -52,8 +80,8 @@ def _coordinate_label(lat: str, long: str) -> str:
     return "c" + _short_hash(f"{latitude:.4f},{longitude:.4f}")
 
 
-def _address_label(address: str) -> str:
-    normal = _NOT_ALNUM.sub(" ", address.lower()).strip()
+def address_label(address: str) -> str:
+    normal = " ".join(words(address))
     return "a" + _short_hash(normal) if normal else ""
 
 
@@ -61,7 +89,7 @@ def _label(entry: KeyInput) -> str:
     wikidata = entry.wikidata.strip().upper()
     if _WIKIDATA.fullmatch(wikidata):
         return wikidata
-    return _coordinate_label(entry.lat, entry.long) or _address_label(entry.address)
+    return _coordinate_label(entry.lat, entry.long) or address_label(entry.address)
 
 
 def assign_keys(entries: Iterable[KeyInput]) -> dict[tuple[int, int], str]:

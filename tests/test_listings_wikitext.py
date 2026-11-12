@@ -144,3 +144,34 @@ def test_a_marker_inside_a_listing_is_not_a_marker():
     page = parse_page("== See ==\n{{see|name=Fort|content={{marker|name=Odd}}}}")
 
     assert page.markers == []
+
+
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("{{geo|9.1|76.44}}", ("9.1", "76.44")),
+        ("{{Geo|27.0073|76.6071|zoom=16}}", ("27.0073", "76.6071")),
+        ("{{geo|23.483333| 72.783333}}", ("23.483333", "72.783333")),
+        ("{{geo|24.82|93.95|13|zoom=13}}", ("24.82", "93.95")),  # the third value is the zoom
+        ("{{geo|lat=1.5|long=2.5}}", ("1.5", "2.5")),
+        ("{{geo||}}", ("", "")),
+        ("{{geo}}", ("", "")),
+    ],
+)
+def test_the_pages_own_geo_template_is_read(template, expected):
+    assert parse_page(f"Lead text. {template}\n== See ==\n{{{{see|name=A}}}}").geo == expected
+
+
+def test_a_page_without_a_geo_template_has_no_geo():
+    assert parse_page("Lead text.\n== See ==\n{{see|name=A}}").geo is None
+
+
+def test_only_the_first_geo_template_counts():
+    assert parse_page("{{geo|1|2}} and {{geo|3|4}}").geo == ("1", "2")
+
+
+def test_a_marker_in_a_lead_with_no_text_and_no_listings_is_kept():
+    page = parse_page("{{pagebanner}}{{marker|type=see|name=Lonely Fort|lat=1|long=2}}")
+
+    assert [m["name"] for m in page.markers] == ["Lonely Fort"]
+    assert [m["name"] for s in page.sections for m in s.markers] == ["Lonely Fort"]
