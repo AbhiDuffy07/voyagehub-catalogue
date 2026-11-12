@@ -165,12 +165,21 @@ def test_a_very_short_lead_is_flagged_but_kept(result):
     assert row["flags"] == ["very_short"] and row["lead_text"] == "A stub."
 
 
-def test_a_redirect_is_flagged_and_credits_the_article_that_was_read(result):
+def test_a_redirected_summary_is_held_back_with_the_flag_and_no_text(result):
     row = rows(result)[(1, 8)]
     assert row["flags"] == ["redirected"]
+    assert row["lead_text"] is None and row["summary"] is None
     assert (row["requested_title"], row["wikipedia_title"]) == ("Old Name", "Amer Fort")
     assert row["url"] == "https://en.wikipedia.org/wiki/Amer_Fort"
-    assert row["lead_text"].startswith("Amer Fort is a fort")
+
+
+def test_held_back_redirects_are_listed_for_review_with_an_excerpt(result):
+    found = table(result.output_dir / "redirected_candidates.csv")
+    assert len(found) == 1
+    row = found[0]
+    assert (row["subject"], row["page_id"], row["ordinal"]) == ("listing", "1", "8")
+    assert (row["requested_title"], row["wikipedia_title"]) == ("Old Name", "Amer Fort")
+    assert row["excerpt"].startswith("Amer Fort is a fort")
 
 
 def test_rows_are_sorted_by_page_then_ordinal(result):
@@ -203,7 +212,7 @@ def test_manifest_records_inputs_rules_totals_and_output_hashes(result, enrich_f
     assert "summaries.jsonl" in manifest["outputs_sha256"]
     totals = manifest["totals"]
     assert totals["rows"] == 9 and totals["articles"] == 3 and totals["listings"] == 6
-    assert totals["with_text"] == 6
+    assert totals["with_text"] == 5
     assert totals["flags"]["missing_page"] == 1
 
 

@@ -1,3 +1,6 @@
+import threading
+import time
+
 import httpx
 import pytest
 import respx
@@ -120,7 +123,7 @@ def test_titles_go_in_batches_of_twenty_sorted_without_duplicates(client):
     seen = []
     respx.get(ENWIKI).mock(side_effect=fake_wikipedia_summaries({}, seen=seen))
     titles = [f"Place {n:02d}" for n in range(45)] + ["Place 00", "Place 07"]
-    fetch_summaries(client, titles)
+    fetch_summaries(client, titles, workers=1)
     batches = [p["titles"].split("|") for p in seen]
     assert [len(b) for b in batches] == [20, 20, 5]
     flat = [t for b in batches for t in b]
@@ -202,6 +205,62 @@ def test_a_continuation_that_never_ends_stops_with_a_safe_error(client):
     respx.get(ENWIKI).mock(side_effect=endless)
     with pytest.raises(PipelineError, match="continu"):
         fetch_summaries(client, ["A"])
+
+
+# --- worker threads -----------------------------------------------------------------------------
+
+
+def many_pages(count=60):
+    pages = {}
+    for n in range(count):
+        pages[f"Place {n:02d}"] = page(f"Place {n:02d} is a place.", revid=n + 1)
+    pages["Place 07"] = page("Place 07 may refer to:", disambiguation=True)
+    return pages
+
+
+@respx.mock
+def test_three_workers_give_the_same_results_as_one(client):
+    titles = [f"Place {n:02d}" for n in range(60)] + ["Missing One"]
+    respx.get(ENWIKI).mock(side_effect=fake_wikipedia_summaries(many_pages()))
+    one = fetch_summaries(client, titles, workers=1)
+    three = fetch_summaries(client, titles, workers=3)
+    assert one == three and len(one) == 61
+    assert one["Missing One"].status == "missing" and one["Place 07"].status == "disambiguation"
+
+
+@respx.mock
+def test_requests_overlap_but_never_more_than_three_at_once(client):
+    state = {"now": 0, "max": 0}
+    lock = threading.Lock()
+    inner = fake_wikipedia_summaries(many_pages())
+
+    def slow(request):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        time.sleep(0.05)
+        try:
+            return inner(request)
+        finally:
+            with lock:
+                state["now"] -= 1
+
+    respx.get(ENWIKI).mock(side_effect=slow)
+    fetch_summaries(client, [f"Place {n:02d}" for n in range(60)], workers=3)
+    assert 2 <= state["max"] <= 3
+
+
+@respx.mock
+def test_a_failure_stops_the_run_without_requesting_everything(client):
+    route = respx.get(ENWIKI).mock(return_value=httpx.Response(400))
+    with pytest.raises(PipelineError):
+        fetch_summaries(client, [f"Place {n:03d}" for n in range(400)], workers=3)
+    assert route.call_count <= 8  # 20 batches were possible; only those already running stop
+
+
+def test_the_number_of_workers_must_be_positive(client):
+    with pytest.raises(ValueError):
+        fetch_summaries(client, ["Jaipur"], workers=0)
 
 
 # --- the rules file -----------------------------------------------------------------------------

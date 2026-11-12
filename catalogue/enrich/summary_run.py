@@ -39,7 +39,7 @@ from catalogue.enrich.summary import (
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.output import JsonlWriter
-from catalogue.listings.run import parse_dump_date
+from catalogue.listings.run import _safe_cell, parse_dump_date
 
 SCHEMA_VERSION = 1
 LISTING_KINDS = frozenset({"see", "do"})
@@ -159,13 +159,16 @@ def _row(
         flags.append("disambiguation")
     elif not page.extract:
         flags.append("empty_extract")
-    else:
+    elif not page.redirected:
         lead = page.extract
         if len(lead) < rules.very_short_chars:
             flags.append("very_short")
         if has_extract_gap(lead):
             flags.append("extract_gap")
     if page.redirected:
+        # Owner ruling 2026-11-12: a page reached through a redirect often describes something
+        # broader or different (a lake's summary is its town's), so its text is held back. The
+        # row keeps the flag and the target; `redirected_candidates.csv` shows what was held.
         flags.append("redirected")
     title = page.title
     return {
@@ -265,9 +268,25 @@ def run_wikipedia_summary(
     flag_counts: Counter = Counter()
     by_country_flag: Counter = Counter()
     lengths: list[int] = []
+    held: list[list[Any]] = []  # redirected summaries held back, for review
     with JsonlWriter(target / "summaries.jsonl") as out:
         for subject in subjects:
-            row = _row(subject, pages[subject.title], rules, dump_date, read_at)
+            page = pages[subject.title]
+            row = _row(subject, page, rules, dump_date, read_at)
+            if page.redirected and page.status == "ok" and page.extract:
+                held.append(
+                    [
+                        subject.kind,
+                        subject.page_id,
+                        subject.ordinal,
+                        _safe_cell(subject.listing_key or ""),
+                        subject.country_iso or "",
+                        _safe_cell(subject.title),
+                        _safe_cell(page.title or ""),
+                        row["url"],
+                        _safe_cell(first_paragraph(page.extract)[:300]),
+                    ]
+                )
             out.write(row)
             country = subject.country_iso or NO_COUNTRY
             tally = counts.setdefault((country, f"{subject.kind}s"), Counter())
@@ -288,6 +307,23 @@ def run_wikipedia_summary(
                 [c, s, t["rows"], t["with_text"], t["flagged"]]
                 for (c, s), t in sorted(counts.items())
             ],
+        ),
+    )
+    write_text(
+        target / "redirected_candidates.csv",
+        _csv_text(
+            [
+                "subject",
+                "page_id",
+                "ordinal",
+                "listing_key",
+                "country_iso",
+                "requested_title",
+                "wikipedia_title",
+                "url",
+                "excerpt",
+            ],
+            held,
         ),
     )
     write_text(

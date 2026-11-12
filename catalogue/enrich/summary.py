@@ -15,6 +15,7 @@ returned, and `first_paragraph` only cuts it at a line break.
 import re
 import tomllib
 from collections.abc import Iterable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 BATCH_SIZE = 20  # the API limit for extracts
 MAX_CONTINUATIONS = 20
 MAX_REDIRECT_HOPS = 5
+DEFAULT_WORKERS = 3  # the polite client's own limit: at most 3 requests at once
 LICENCE = "CC BY-SA 4.0"
 LICENCE_URL = "https://creativecommons.org/licenses/by-sa/4.0/"
 ATTRIBUTION_TEXT = "Wikipedia contributors"
@@ -156,13 +158,43 @@ def _summary(requested: str, read: dict[str, Any]) -> PageSummary:
     )
 
 
-def fetch_summaries(client: PoliteClient, titles: Iterable[str]) -> dict[str, PageSummary]:
-    """One result per distinct requested title, in batches of 20 in sorted order."""
+def fetch_summaries(
+    client: PoliteClient, titles: Iterable[str], *, workers: int = DEFAULT_WORKERS
+) -> dict[str, PageSummary]:
+    """One result per distinct requested title, in batches of 20 in sorted order.
+
+    Up to `workers` batches are in flight at once. The polite client still enforces its own limits
+    (3 at once, 200 a minute, Retry-After), so more workers than 3 would only queue. The result
+    does not depend on the order in which the batches finish. When a batch fails, nothing further
+    is started and the error is raised once the batches already running have ended.
+    """
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+    pending = iter(list(_batches(sorted(set(titles)))))
     results: dict[str, PageSummary] = {}
-    for batch in _batches(sorted(set(titles))):
-        read = _read_batch(client, batch)
-        for requested in batch:
-            results[requested] = _summary(requested, read)
+    in_flight: dict[Future[dict[str, Any]], list[str]] = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+
+        def start_next() -> None:
+            batch = next(pending, None)
+            if batch is not None:
+                in_flight[pool.submit(_read_batch, client, batch)] = batch
+
+        for _ in range(workers):
+            start_next()
+        try:
+            while in_flight:
+                finished, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    batch = in_flight.pop(future)
+                    read = future.result()
+                    for requested in batch:
+                        results[requested] = _summary(requested, read)
+                    start_next()
+        except BaseException:
+            for future in in_flight:
+                future.cancel()
+            raise
     return results
 
 
