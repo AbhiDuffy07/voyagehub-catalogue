@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and three jobs work: `discover`, `fetch-listings` and `enrich-wikidata`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and four jobs work: `discover`, `fetch-listings`, `enrich-wikidata` and `wikipedia-summary`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -69,6 +69,18 @@ Network (Wikivoyage, English Wikipedia and Wikidata Action APIs, through the pol
 - **Time zone (destinations):** the place's own single IANA zone, else the country's single zone labelled `country_single_zone`, else empty with a flag.
 - **Entry fees (P2555) are counted, never used (owner ruling, 2026-11-12):** `p2555_counts.csv` and `p2555_samples.csv` show how many attractions have a fee statement, how many are dated and how many are within 2 years. No fee value is in any facts file and Wikidata fees are not used anywhere. On the world run (dump 20261101) only 479 of 58,826 attractions with an item (0.8%) have a fee statement, 20 are dated and 13 are within 2 years; in India 12 of 3,023, none dated, with no audiences. Fees come from official sources only (the ASI list first); the counting stays so the numbers can be watched.
 - **Files:** `destination_facts.jsonl` (one row per article), `listing_facts.jsonl` (listings that have an item, or that have no usable point), the tables above, `coord_fill_by_country.csv` and `flags_by_country.csv` (coordinates before and after, by country), `report.md`, `detail-<CC>.md` and `manifest.json`. Every row carries its Wikidata source, revision and CC0 licence. A second run on the same day gives identical files; on another day `read_at` differs, and Wikidata itself may have changed. `destinations.jsonl` is not covered by a manifest hash, so the run only checks that its pages exist in `articles.jsonl`. A reply from Wikidata that leaves out a requested item stops the run instead of flagging those items as missing.
+
+### `wikipedia-summary`
+
+```text
+.venv\Scripts\python -m catalogue wikipedia-summary --dump-date 20261101 --country IN
+```
+
+Network (English Wikipedia Action API, through the polite client; needs `CONTACT_EMAIL`). Writes local files only to `out/summaries/<dump date>[-CC]/`. It reads `out/enrich/<dump date>[-CC]/` and refuses to run unless `destination_facts.jsonl` and `listing_facts.jsonl` match that run's manifest (hashes) and country filter. The subjects are every article, and every see/do listing, for which Wikidata names an English Wikipedia article (`enwiki_title`). Each distinct title is fetched once, 20 per request (`extracts`, `revisions`, `pageprops`), not through the REST `page/summary` endpoint, which takes one title per request and is on the way out with RESTBase.
+
+- **Rows (`summaries.jsonl`):** `lead_text` (the plain-text lead as the API returned it), `summary` (its first paragraph, cut at a line break and nothing else), the article title, `url`, a `permalink` to the revision read, `history_url` (where the authors are listed), `revision_id` and timestamp, `licence` (CC BY-SA 4.0) with its link, and an `attribution` that says it is an excerpt. A summary must always be shown with that credit.
+- **Flags, never silent fixes:** `missing_page`, `disambiguation` (no text stored), `empty_extract`, `very_short` (shorter than `config/summary_rules.toml` says; the text is kept), `redirected` (the credit names the article that was read), `no_answer` (the reply left the title out). A reply that never stops continuing ends the run with a message.
+- **Files:** `summaries.jsonl`, `summaries_by_country.csv`, `flags_by_country.csv`, `report.md` (with the lead-length percentiles the `very_short` limit is checked against) and `manifest.json` (input hashes, rules version, output hashes).
 
 Settings come from environment variables (names only in [.env.example](.env.example)); a local `.env` file is read when present. Nothing secret is ever committed.
 

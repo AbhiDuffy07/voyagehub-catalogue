@@ -117,3 +117,49 @@ def write_inputs(
         encoding="utf-8",
     )
     return discover, listings_dir
+
+
+def destination_row(page_id, title, *, enwiki=None, iso="IN", qid=None, role="destination"):
+    """A row of the enrich output's destination_facts.jsonl (only what B4b reads)."""
+    return {
+        "wikivoyage_page_id": page_id,
+        "title": title,
+        "role": role,
+        "tree_country_iso": iso,
+        "wikidata_id": qid,
+        "enwiki_title": enwiki,
+    }
+
+
+def listing_fact(page_id, ordinal, key, *, kind="see", enwiki=None, iso="IN", qid=None):
+    """A row of the enrich output's listing_facts.jsonl (only what B4b reads)."""
+    return {
+        "page_id": page_id,
+        "ordinal": ordinal,
+        "listing_key": key,
+        "listing_kind": kind,
+        "country_iso": iso,
+        "wikidata_id": qid,
+        "enwiki_title": enwiki,
+    }
+
+
+def write_enrich_output(root: Path, *, destinations, listings, country_filter="IN"):
+    """Write a tiny enrich output folder with a manifest that hashes its two row files."""
+    root.mkdir(parents=True)
+    destination_hash = _jsonl(root / "destination_facts.jsonl", destinations)
+    listing_hash = _jsonl(root / "listing_facts.jsonl", listings)
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "country_filter": country_filter,
+                "dump_date": "20261101",
+                "outputs_sha256": {
+                    "destination_facts.jsonl": destination_hash,
+                    "listing_facts.jsonl": listing_hash,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
