@@ -3,11 +3,13 @@ import respx
 from catalogue.discover.confirm import fetch_entities, fetch_wikidata_ids
 from catalogue.enrich.items import fetch_items
 from catalogue.enrich.links import resolve_wikipedia_links
+from catalogue.enrich.summary import fetch_summaries
 from tests.apifakes import (
     entity,
     fake_wikidata,
     fake_wikidata_full,
     fake_wikipedia,
+    fake_wikipedia_summaries,
     fake_wikivoyage,
     item_claim,
 )
@@ -60,3 +62,13 @@ def test_resolving_links_counts_only_the_titles_it_looks_up(client, capsys):
     out = capsys.readouterr().out
     assert "progress: Wikipedia links 2 of 2 (100%) done" in out
     assert "Amer" not in out and "Schloss" not in out
+
+
+@respx.mock
+def test_fetching_summaries_reports_distinct_titles_done_and_no_text(client, capsys):
+    page = {"extract": "Jaipur is a city.", "revid": 1, "timestamp": "2026-11-02T10:00:00Z"}
+    respx.get(ENWIKI).mock(side_effect=fake_wikipedia_summaries({"Jaipur": page, "Agra": page}))
+    fetch_summaries(client, ["Jaipur", "Agra", "Jaipur"])
+    out = capsys.readouterr().out
+    assert "progress: Wikipedia titles 2 of 2 (100%) done" in out
+    assert "Jaipur" not in out and "city" not in out
