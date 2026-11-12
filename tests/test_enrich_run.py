@@ -527,3 +527,52 @@ def test_a_hostile_fee_amount_is_escaped_in_the_review_csv(client, folders, tmp_
 def test_the_report_labels_its_percentage_column(result):
     text = (result.output_dir / "report.md").read_text(encoding="utf-8")
     assert "| Share filled |" in text
+
+
+@respx.mock
+def test_a_territory_whose_article_is_not_typed_country_still_has_its_country_check(
+    client, tmp_path
+):
+    # Hong Kong is a "city" article that discover treats as its own country (HK). Wikidata names
+    # China for places in it, which the territory rule accepts.
+    folders = write_inputs(
+        tmp_path / "in",
+        articles=[article(1, "Hong Kong", qid="Q8646", iso="HK", country_name="Hong Kong")],
+        listings=[
+            listing(
+                1,
+                1,
+                "Victoria Peak",
+                wikidata="Q200",
+                iso="HK",
+                page_lat="22.28",
+                page_long="114.15",
+            )
+        ],
+        country_filter="HK",
+        page_geo={1: ("22.28", "114.15")},
+    )
+    entities = {
+        **ENTITIES,
+        "Q8646": entity({"P17": [item_claim("Q148")]}, label="Hong Kong"),
+        "Q200": entity(
+            {"P17": [item_claim("Q148")], **dict([point(22.27, 114.14)])}, label="Victoria Peak"
+        ),
+    }
+    respx.get(WIKIVOYAGE).mock(side_effect=fake_wikivoyage({}))
+    respx.get(ENWIKI).mock(side_effect=fake_wikipedia({}))
+    respx.get(WIKIDATA).mock(side_effect=fake_wikidata_full(entities))
+    discover, listings_folder = folders
+    done = run_enrich_wikidata(
+        client,
+        discover_folder=discover,
+        listings_folder=listings_folder,
+        out_dir=tmp_path / "out",
+        dump_date="20261101",
+        today=TODAY,
+        country_iso="HK",
+        quality_rules=load_rules(),
+        kind_map=KIND_MAP,
+    )
+    row = jsonl(done.output_dir / "listing_facts.jsonl")[0]
+    assert row["flags"] == [] and row["coord_filled"] is True

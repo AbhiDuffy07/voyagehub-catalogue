@@ -12,7 +12,15 @@ def _jsonl(path: Path, rows) -> str:
 
 
 def article(
-    page_id, title, *, type_="city", role="destination", qid=None, iso="IN", status="usable"
+    page_id,
+    title,
+    *,
+    type_="city",
+    role="destination",
+    qid=None,
+    iso="IN",
+    status="usable",
+    country_name=None,
 ):
     return {
         "wikivoyage_page_id": page_id,
@@ -21,7 +29,7 @@ def article(
         "role": role,
         "status": status,
         "wikidata_id": qid,
-        "tree_country": "India" if iso == "IN" else None,
+        "tree_country": country_name or ("India" if iso == "IN" else None),
         "tree_country_iso": iso,
     }
 

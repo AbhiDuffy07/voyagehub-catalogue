@@ -299,10 +299,13 @@ def run_enrich_wikidata(
             return result.items[qid], None
         return None, "item_missing"
 
+    # A country's own article is the one named by its pages' `tree_country`. It is not always typed
+    # "country": discover also makes a catalogue country of a dependent territory with its own ISO
+    # code, and Hong Kong and Macau are `city` articles, Puerto Rico a `region`.
     country_qid = {
         a.tree_country_iso: article_qid[a.page_id][0]
         for a in articles
-        if a.type == "country" and a.tree_country_iso and a.page_id in article_qid
+        if a.tree_country_iso and a.title == a.tree_country and a.page_id in article_qid
     }
     acceptable: dict[str, frozenset[str]] = {}
     for iso, qid in country_qid.items():
