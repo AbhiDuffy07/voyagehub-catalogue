@@ -10,6 +10,8 @@ from datetime import date
 from catalogue.enrich.claims import PART_OF_WORLD_HERITAGE_SITE, ItemFacts
 
 WORLD_HERITAGE_SITE = "Q9259"  # labels checked against live Wikidata at the start of every run
+BADGE_SITE = "world_heritage_site"
+BADGE_COMPONENT = "part_of_world_heritage_site"
 FRESH_YEARS = 2  # the design's 2-year rule for prices, applied to counting only
 
 
@@ -20,6 +22,7 @@ class UnescoStatus:
     flags: tuple[str, ...]
     parent_qid: str | None = None  # the site a component belongs to, when Wikidata names one
     parent_label: str | None = None  # that site's English label
+    badge: str | None = None  # what the app may show: a site, or a component with a named site
 
 
 def unesco_status(
@@ -35,14 +38,18 @@ def unesco_status(
     World Heritage Site: <site>"). The parent comes from the designation's own P361 qualifier:
     none or several give no parent and a flag, and a parent that is not itself a World Heritage
     Site is kept but flagged. `parents` holds the fetched items; without it the parent is not
-    checked. A component may carry the site's ID without a flag."""
+    checked. A component may carry the site's ID without a flag.
+
+    `badge` is what the app may show (owner ruling 2026-11-12): a site, or a component whose
+    parent site is named AND verified as a World Heritage Site. A component without one gets the
+    flag and no badge, because the wording always needs the site's name."""
     if item is None:
         return UnescoStatus(False, False, ())
     designated = WORLD_HERITAGE_SITE in item.heritage
     component = PART_OF_WORLD_HERITAGE_SITE in item.heritage and not designated
     identified = bool(item.whc_ids)
     if designated and identified:
-        return UnescoStatus(True, False, ())
+        return UnescoStatus(True, False, (), badge=BADGE_SITE)
     if designated or (identified and not component):
         return UnescoStatus(False, False, ("unesco_inconsistent",))
     if not component:
@@ -55,8 +62,11 @@ def unesco_status(
     if parents is None:
         return UnescoStatus(False, True, (), parent_qid)
     parent = parents.get(parent_qid)
-    flags = () if parent and WORLD_HERITAGE_SITE in parent.heritage else ("unesco_parent_not_whs",)
-    return UnescoStatus(False, True, flags, parent_qid, parent.label if parent else None)
+    verified = parent is not None and WORLD_HERITAGE_SITE in parent.heritage
+    label = parent.label if parent else None
+    flags = () if verified else ("unesco_parent_not_whs",)
+    badge = BADGE_COMPONENT if verified and label else None
+    return UnescoStatus(False, True, flags, parent_qid, label, badge)
 
 
 def kind_of(

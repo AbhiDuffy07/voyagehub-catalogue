@@ -28,7 +28,7 @@ PART_OF = "Q43113623"  # "part of UNESCO World Heritage Site"
 
 def test_unesco_needs_the_world_heritage_designation_and_an_id():
     both = item({"P1435": [item_claim("Q9259")], "P757": [string_claim("252")]})
-    assert unesco_status(both) == UnescoStatus(True, False, ())
+    assert unesco_status(both) == UnescoStatus(True, False, (), badge="world_heritage_site")
 
 
 def test_no_designation_and_no_id_is_plainly_not_unesco():
@@ -67,7 +67,9 @@ def component(*parents, **extra):
 
 def test_a_component_is_marked_apart_with_its_parent_site_id_and_label():
     status = unesco_status(component(PARENT), parent_site())
-    assert status == UnescoStatus(False, True, (), PARENT, "Hill Forts of Rajasthan")
+    assert status == UnescoStatus(
+        False, True, (), PARENT, "Hill Forts of Rajasthan", "part_of_world_heritage_site"
+    )
 
 
 def test_a_component_may_carry_a_world_heritage_id_without_a_flag():
@@ -104,7 +106,9 @@ def test_an_item_that_is_both_the_site_and_marked_part_of_is_the_site():
             "P757": [string_claim("247")],
         }
     )
-    assert unesco_status(both, parent_site()) == UnescoStatus(True, False, ())
+    assert unesco_status(both, parent_site()) == UnescoStatus(
+        True, False, (), badge="world_heritage_site"
+    )
 
 
 def test_an_ended_part_of_designation_is_not_a_component():
@@ -112,8 +116,23 @@ def test_an_ended_part_of_designation_is_not_a_component():
     assert unesco_status(ended, parent_site()) == UnescoStatus(False, False, ())
 
 
-def test_parents_are_looked_up_only_when_given():
-    assert unesco_status(component(PARENT)).parent_qid == PARENT
+def test_parents_are_looked_up_only_when_given_and_without_them_there_is_no_badge():
+    status = unesco_status(component(PARENT))
+    assert status.parent_qid == PARENT and status.badge is None
+
+
+def test_no_badge_unless_a_verified_parent_site_is_named():
+    # The badge always needs the parent site's name: "Part of UNESCO World Heritage Site: <site>".
+    assert unesco_status(component(), parent_site()).badge is None  # no parent
+    assert unesco_status(component(PARENT, "Q4527"), parent_site()).badge is None  # two parents
+    assert unesco_status(component(PARENT), parent_site(whs=False)).badge is None  # not a site
+    assert unesco_status(component(PARENT), {}).badge is None  # parent not fetched
+    assert unesco_status(component(PARENT), parent_site()).badge == "part_of_world_heritage_site"
+
+
+def test_inconsistent_items_get_no_badge():
+    only_designation = item({"P1435": [item_claim("Q9259")]})
+    assert unesco_status(only_designation).badge is None
 
 
 # --- kind ---------------------------------------------------------------------------------------

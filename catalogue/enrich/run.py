@@ -17,7 +17,7 @@ Nothing here is country-specific. Fee amounts are counted and sampled for review
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -71,7 +71,7 @@ NO_COUNTRY = "(none)"
 class CoordCount:
     missing_before: int = 0
     filled: int = 0
-    filled_via_link: int = 0
+    via_link_unverified: int = 0
     flags: Counter = field(default_factory=Counter)
 
 
@@ -80,7 +80,7 @@ class Tally:
     coords: dict[tuple[str, str], CoordCount] = field(default_factory=dict)
     link_status: Counter = field(default_factory=Counter)
     link_rows: list[tuple[int, int, str, str, str, str]] = field(default_factory=list)
-    link_fills: list[tuple[int, int, str, str, str, str, str, Any, Any]] = field(
+    link_candidates: list[tuple[int, int, str, str, str, str, str, Any, Any]] = field(
         default_factory=list
     )
     heritage: dict[tuple[str, str], set[str]] = field(default_factory=lambda: defaultdict(set))
@@ -138,9 +138,7 @@ def _item_fields(
     kind, kind_flags = kind_of(item, kind_map)
     flags += [*unesco.flags, *kind_flags]
     if item is not None:
-        tally.unesco[
-            "unesco" if unesco.is_unesco else "component" if unesco.component else "no"
-        ] += 1
+        tally.unesco[_unesco_kind(unesco)] += 1
         if unesco.component and unesco.parent_qid:
             tally.components[(key_country or NO_COUNTRY, unesco.parent_qid)].add(item.qid)
         for designation in item.heritage:
@@ -152,6 +150,7 @@ def _item_fields(
     fields = {
         "is_unesco": unesco.is_unesco,
         "unesco_component": unesco.component,
+        "unesco_badge": unesco.badge,
         "unesco_parent_qid": unesco.parent_qid,
         "unesco_parent_label": unesco.parent_label,
         "heritage": list(item.heritage) if item else [],
@@ -164,6 +163,14 @@ def _item_fields(
         "wikidata_revision_id": item.revision_id if item else None,
     }
     return fields, flags
+
+
+def _unesco_kind(unesco: Any) -> str:
+    if unesco.is_unesco:
+        return "unesco"
+    if unesco.component:
+        return "component_with_badge" if unesco.badge else "component_without_badge"
+    return "no"
 
 
 def _coordinate_fields(own: tuple[float, float] | None, decision: CoordDecision | None) -> dict:
@@ -371,12 +378,12 @@ def run_enrich_wikidata(
                 disagreement_km=rules.disagreement_km,
                 max_precision=rules.max_precision_degrees,
             )
-            if decision.filled:
-                counts.filled += 1
-                counts.filled_via_link += source == "wikipedia_link"
             fields, extra = _item_fields(item, kind_map, tally, x.country_iso, items)
             if decision.filled and source == "wikipedia_link" and item is not None:
-                tally.link_fills.append(
+                # Owner ruling 2026-11-12: a coordinate that came through a wikipedia= link is not
+                # filled, because a link can name a broad article (a lake for a camp beside it).
+                # It stays as wikidata_lat/long for B7 to confirm against OpenStreetMap.
+                tally.link_candidates.append(
                     (
                         x.page_id,
                         x.ordinal,
@@ -389,6 +396,17 @@ def run_enrich_wikidata(
                         decision.lon,
                     )
                 )
+                counts.via_link_unverified += 1
+                decision = replace(
+                    decision,
+                    filled=False,
+                    lat=None,
+                    lon=None,
+                    source=None,
+                    flags=(*decision.flags, "via_link_unverified"),
+                )
+            elif decision.filled:
+                counts.filled += 1
             flags = sorted({*decision.flags, *extra})
             counts.flags.update(flags)
             if item is not None and x.kind in FEE_KINDS:

@@ -250,15 +250,18 @@ def test_each_refusal_has_its_flag(result):
     assert flags[(1, 10)] == ["no_wikidata_id"]
     assert flags[(1, 11)] == ["item_merged"]
     filled = {k for k, r in rows.items() if r["coord_filled"]}
-    assert filled == {(1, 1), (1, 4)}
+    assert filled == {(1, 1)}
     assert (rows[(1, 3)]["wikidata_lat"], rows[(1, 3)]["wikidata_long"]) == (10.0, 10.0)
 
 
-def test_a_wikipedia_link_resolves_and_the_listing_is_filled(result):
+def test_a_wikipedia_link_resolves_but_its_coordinate_is_held_back_unverified(result):
     rows = listings(result)
     row = rows[(1, 4)]
     assert row["wikidata_id"] == "Q103" and row["wikidata_source"] == "wikipedia_link"
-    assert row["wikipedia_status"] == "resolved" and row["coord_filled"]
+    assert row["wikipedia_status"] == "resolved"
+    assert row["coord_filled"] is False and row["coord_lat"] is None and row["coord_source"] is None
+    assert (row["wikidata_lat"], row["wikidata_long"]) == (26.92, 75.83)
+    assert row["flags"] == ["via_link_unverified"]
     assert rows[(1, 5)]["wikipedia_status"] == "disambiguation"
     assert rows[(1, 5)]["wikidata_id"] is None
 
@@ -281,8 +284,8 @@ def test_coordinate_counts_before_and_after_by_country(result):
         for r in table(result.output_dir / "coord_fill_by_country.csv")
     }
     listings_row = rows[("IN", "listings")]
-    assert (listings_row["missing_before"], listings_row["filled"]) == ("9", "2")
-    assert listings_row["filled_via_wikipedia_link"] == "1" and listings_row["still_missing"] == "7"
+    assert (listings_row["missing_before"], listings_row["filled"]) == ("9", "1")
+    assert listings_row["via_link_unverified"] == "1" and listings_row["still_missing"] == "8"
     destinations_row = rows[("IN", "destinations")]
     assert (destinations_row["missing_before"], destinations_row["filled"]) == ("4", "2")
     assert destinations_row["still_missing"] == "2"
@@ -327,7 +330,8 @@ def test_manifest_records_inputs_rules_and_output_hashes(result):
     assert manifest["enrich_rules_version"] == 2 and manifest["quality_rules_version"] == 2
     assert len(manifest["listings_manifest_sha256"]) == 64
     assert set(manifest["outputs_sha256"]) >= {"destination_facts.jsonl", "listing_facts.jsonl"}
-    assert manifest["totals"]["listings"]["filled"] == 2
+    assert manifest["totals"]["listings"]["filled"] == 1
+    assert manifest["totals"]["listings"]["via_link_unverified"] == 1
 
 
 def test_the_summary_has_counts_and_no_row_text(result):
@@ -490,8 +494,8 @@ def test_a_destinations_file_from_another_discover_run_is_refused(client, tmp_pa
         assert not route.called
 
 
-def test_every_fill_through_a_wikipedia_link_is_listed_for_review(result):
-    rows = table(result.output_dir / "wikipedia_link_fills.csv")
+def test_every_held_back_wikipedia_link_coordinate_is_listed_for_b7(result):
+    rows = table(result.output_dir / "wikipedia_link_candidates.csv")
     assert len(rows) == 1
     row = rows[0]
     assert (row["listing_key"], row["qid"], row["label"]) == (
@@ -576,3 +580,23 @@ def test_a_territory_whose_article_is_not_typed_country_still_has_its_country_ch
     )
     row = jsonl(done.output_dir / "listing_facts.jsonl")[0]
     assert row["flags"] == [] and row["coord_filled"] is True
+
+
+def test_a_site_and_a_component_with_a_named_parent_get_a_badge_and_others_do_not(result):
+    rows = listings(result)
+    assert rows[(1, 1)]["unesco_badge"] == "world_heritage_site"
+    assert rows[(1, 12)]["unesco_badge"] == "part_of_world_heritage_site"
+    assert rows[(1, 2)]["unesco_badge"] is None
+
+
+def test_a_component_without_a_named_parent_gets_the_flag_and_no_badge(client, folders, tmp_path):
+    bare = {
+        **ENTITIES,
+        "Q105": entity(in_india(("P1435", [part_of_whs_claim()]), ("P757", [string_claim("247")]))),
+    }
+    with respx.mock:
+        mock_all(entities=bare)
+        done = run(client, folders, tmp_path)
+    row = listings(done)[(1, 12)]
+    assert row["unesco_component"] is True and row["unesco_badge"] is None
+    assert row["flags"] == ["unesco_parent_missing"]

@@ -120,7 +120,7 @@ def build_totals(
             "rows": listing_rows,
             "missing_before": _sum(tally, "listings", "missing_before"),
             "filled": _sum(tally, "listings", "filled"),
-            "filled_via_wikipedia_link": _sum(tally, "listings", "filled_via_link"),
+            "via_link_unverified": _sum(tally, "listings", "via_link_unverified"),
             "flags": _flag_totals(tally, "listings"),
         },
         "destinations": {
@@ -154,7 +154,8 @@ def summary_text(totals: Mapping[str, Any]) -> str:
         f"(rows written: {listings['rows']})",
         f"listing coordinates filled: {listings['filled']} of {listings['missing_before']} missing "
         f"({_percent(listings['filled'], listings['missing_before'])}); "
-        f"{listings['filled_via_wikipedia_link']} of them through a wikipedia= link",
+        f"{listings['via_link_unverified']} more held back as via_link_unverified "
+        "(a coordinate that came through a wikipedia= link)",
         f"destination coordinates filled: {destinations['filled']} of "
         f"{destinations['missing_before']} missing "
         f"({_percent(destinations['filled'], destinations['missing_before'])})",
@@ -268,7 +269,7 @@ def write_all(
             subject,
             c.missing_before,
             c.filled,
-            c.filled_via_link,
+            c.via_link_unverified,
             c.missing_before - c.filled,
         ]
         for (country, subject), c in sorted(tally.coords.items())
@@ -281,7 +282,7 @@ def write_all(
                 "subject",
                 "missing_before",
                 "filled",
-                "filled_via_wikipedia_link",
+                "via_link_unverified",
                 "still_missing",
             ],
             coord_rows,
@@ -340,7 +341,7 @@ def write_all(
         [country, designation, _safe_cell(_label(items, designation)), len(ids)]
         for (country, designation), ids in sorted(tally.heritage.items())
     ]
-    link_fill_rows = [
+    link_candidate_rows = [
         [
             page_id,
             ordinal,
@@ -353,11 +354,11 @@ def write_all(
             lon,
         ]
         for page_id, ordinal, key, value, qid, label, kind, lat, lon in sorted(
-            tally.link_fills, key=lambda row: row[:2]
+            tally.link_candidates, key=lambda row: row[:2]
         )
     ]
     write_text(
-        target / "wikipedia_link_fills.csv",
+        target / "wikipedia_link_candidates.csv",
         _csv_text(
             [
                 "page_id",
@@ -370,7 +371,7 @@ def write_all(
                 "coord_lat",
                 "coord_long",
             ],
-            link_fill_rows,
+            link_candidate_rows,
         ),
     )
     write_text(
