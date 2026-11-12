@@ -23,6 +23,7 @@ class ArticleIn:
     role: str
     wikidata_id: str | None
     tree_country_iso: str | None
+    tree_country: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +115,7 @@ def read_articles(discover_folder: Path) -> list[ArticleIn]:
                     role=row["role"],
                     wikidata_id=row.get("wikidata_id"),
                     tree_country_iso=row.get("tree_country_iso"),
+                    tree_country=row.get("tree_country"),
                 )
             )
         except KeyError:

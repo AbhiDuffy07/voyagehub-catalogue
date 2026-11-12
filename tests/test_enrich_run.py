@@ -39,9 +39,7 @@ ARTICLES = [
     article(7, "Badgeo", role="destination_outline", status="outline"),
 ]
 PAGE_GEO = {2: ("", ""), 3: ("", ""), 4: ("", ""), 7: ("999", "10")}
-DESTINATIONS = [
-    {"wikivoyage_page_id": 1, "confirmation": "confirmed", "confirmation_reason": None}
-]
+DESTINATIONS = [{"wikivoyage_page_id": 1, "confirmation": "confirmed", "confirmation_reason": None}]
 
 LISTINGS = [
     listing(1, 1, "Amber Fort", wikidata="Q100"),
@@ -66,9 +64,7 @@ def point(lat, lon):
     return ("P625", [coordinate_claim(lat, lon)])
 
 
-FEE = quantity_claim(
-    "+100", RUPEE, qualifiers={"P585": time_qualifier("+2026-01-01T00:00:00Z")}
-)
+FEE = quantity_claim("+100", RUPEE, qualifiers={"P585": time_qualifier("+2026-01-01T00:00:00Z")})
 
 ENTITIES = {
     "Q10": entity(in_india(point(26.93, 75.83), ("P421", [item_claim(TZ_ITEM)])), label="Jaipur"),
@@ -245,7 +241,8 @@ def test_each_refusal_has_its_flag(result):
     assert flags[(1, 8)] == ["item_missing"]
     assert flags[(1, 10)] == ["no_wikidata_id"]
     assert flags[(1, 11)] == ["item_merged"]
-    assert all(not rows[k]["coord_filled"] for k in flags if k != (1, 4))
+    filled = {k for k, r in rows.items() if r["coord_filled"]}
+    assert filled == {(1, 1), (1, 4)}
     assert (rows[(1, 3)]["wikidata_lat"], rows[(1, 3)]["wikidata_long"]) == (10.0, 10.0)
 
 
@@ -264,12 +261,17 @@ def test_listings_with_nothing_to_say_have_no_row(result):
 
 def test_wikipedia_links_file_lists_every_outcome(result):
     rows = {r["listing_key"]: r for r in table(result.output_dir / "wikipedia_links.csv")}
-    assert rows["see:hawa-mahal"]["status"] == "resolved" and rows["see:hawa-mahal"]["qid"] == "Q103"
+    assert (
+        rows["see:hawa-mahal"]["status"] == "resolved" and rows["see:hawa-mahal"]["qid"] == "Q103"
+    )
     assert rows["see:mercury-temple"]["status"] == "disambiguation"
 
 
 def test_coordinate_counts_before_and_after_by_country(result):
-    rows = {(r["country_iso"], r["subject"]): r for r in table(result.output_dir / "coord_fill_by_country.csv")}
+    rows = {
+        (r["country_iso"], r["subject"]): r
+        for r in table(result.output_dir / "coord_fill_by_country.csv")
+    }
     listings_row = rows[("IN", "listings")]
     assert (listings_row["missing_before"], listings_row["filled"]) == ("9", "2")
     assert listings_row["filled_via_wikipedia_link"] == "1" and listings_row["still_missing"] == "7"
