@@ -115,3 +115,14 @@ def test_the_proving_file_titles_are_reported(tmp_path, capsys):
     assert code == 0
     text = (tmp_path / "out" / DATE / "proving-batch.md").read_text(encoding="utf-8")
     assert "| Jaipur | 1 | 0 | 1 |" in text
+
+
+def test_it_prints_progress_lines_with_counts_only(tmp_path, capsys):
+    setup_inputs(tmp_path)
+
+    code = fetch(tmp_path)
+
+    captured = capsys.readouterr()
+    assert code == 0 and captured.err == ""
+    assert "progress: pages 1 of 1 (100%) done" in captured.out
+    assert SECRET not in captured.out

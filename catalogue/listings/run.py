@@ -40,6 +40,7 @@ from catalogue.listings.reference import Reference, load_reference
 from catalogue.listings.rollup import Owner, resolve_owner
 from catalogue.listings.source import read_articles
 from catalogue.listings.wikitext import RawListing, marker_listing, parse_page
+from catalogue.progress import Progress
 
 # Typed markers on these page types are real places on the rendered page, so they become listings.
 MARKER_LISTING_PAGE_TYPES = frozenset({"city", "district", "park"})
@@ -338,7 +339,9 @@ def run_fetch_listings(
         SortedJsonl(target / "sections.jsonl") as sections_out,
         SortedJsonl(target / "markers.jsonl") as markers_out,
     ):
+        progress = Progress("pages", len(by_id))
         for dump_page in iter_pages(dump_path):
+            progress.advance()
             row = by_id.get(dump_page.page_id)
             if row is None:
                 tally.pages_not_in_articles += 1
@@ -387,6 +390,7 @@ def run_fetch_listings(
                         listing_row["coord_distance_km"]
                     )
 
+        progress.done()
         keys = assign_keys(tally.key_inputs)
         listings_out.finish(_finisher(tally, keys, find_duplicates(tally.dup_inputs)))
         sections_out.finish()

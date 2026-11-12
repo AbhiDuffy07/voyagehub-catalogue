@@ -210,3 +210,14 @@ def test_an_override_for_an_unknown_country_is_a_clean_error(api, capsys, tmp_pa
 
     assert code == 1
     assert "Atlantis" in err
+
+
+def test_discover_prints_progress_lines_with_counts_only(api, capsys, tmp_path):
+    code, out, err = discover(["--dump-date", DATE], capsys, tmp_path)
+
+    assert (code, err) == (0, "")
+    assert "progress: dump pages 2 done" in out
+    assert "progress: Wikivoyage titles" in out and "progress: Wikidata entities" in out
+    assert "Jaipur" not in "".join(
+        line for line in out.splitlines() if line.startswith("progress:")
+    )

@@ -18,6 +18,7 @@ from catalogue.enrich.api import api_get
 from catalogue.enrich.claims import ItemFacts, parse_item
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
+from catalogue.progress import Progress
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 BATCH_SIZE = 50
@@ -43,6 +44,7 @@ def fetch_items(client: PoliteClient, qids: Iterable[str]) -> ItemsResult:
     items: dict[str, ItemFacts] = {}
     missing: set[str] = set()
     redirects: dict[str, str] = {}
+    progress = Progress("Wikidata items", len(wanted))
     for batch in _batches(wanted):
         reply = api_get(
             client,
@@ -68,4 +70,6 @@ def fetch_items(client: PoliteClient, qids: Iterable[str]) -> ItemsResult:
                 redirects[requested] = actual
             if actual not in items:
                 items[actual] = parse_item(actual, entity)
+        progress.advance(len(batch))
+    progress.done()
     return ItemsResult(items, frozenset(missing), redirects)

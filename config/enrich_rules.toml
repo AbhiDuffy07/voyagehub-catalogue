@@ -12,11 +12,15 @@ km = 25
 reason = """When a place has both a Wikivoyage point and a Wikidata point, they are normally \
 within a few hundred metres; further apart than this they are flagged \
 `wikidata_coord_disagrees` for review. The Wikivoyage point is kept either way. Report-only: \
-it never changes a coordinate. Read off the India run (dump 20261101): of 3,498 listings that \
-have both points, the median distance is 0 km, p95 0.6 km, p99 15.7 km, and 29 (0.8%) are \
-above 25 km. Of 1,081 destinations, median 0.14 km, p95 13.5 km, p99 49.4 km, and 38 (3.5%) \
-are above 25 km (a town's centre point is looser than a building's). PROVISIONAL until the \
-world run's table confirms 25 km is not too tight for large countries."""
+it never changes a coordinate. Measured on the world run (dump 20261101): of 59,844 listings \
+that have both points, the median distance is 0 km, p95 1.2 km, p99 24.1 km, and 587 (1.0%) \
+are above 25 km. Of 22,844 destinations, median 0.19 km, p95 6.2 km, p99 33.3 km, and 317 \
+(1.4%) are above 25 km (a town's centre point is looser than a building's). The India run gave \
+the same picture (29 listings, 0.8%, and 38 destinations, 3.5%, above 25 km). Checked against \
+large countries: among countries with at least 200 such listings the highest shares above 25 km \
+are NG 8.2% (244 listings), CN 4.6%, KR 3.9% and CA 3.6%, so 25 km is not too tight for big \
+countries; the highest destination shares (GH, ET, CU, PK) are on 30 to 106 destinations each. \
+Kept at 25 km: it flags about 1% for review and nothing more."""
 
 [coordinates.max_precision]
 degrees = 0.02
