@@ -58,3 +58,72 @@ def fake_wikidata(entities: dict[str, dict], seen: list[list[str]] | None = None
         return httpx.Response(200, json={"entities": body, "success": 1})
 
     return answer
+
+
+EARTH = "http://www.wikidata.org/entity/Q2"
+MOON = "http://www.wikidata.org/entity/Q405"
+
+
+def coordinate_claim(lat, lon, *, globe=EARTH, rank="normal"):
+    """A P625 statement, shaped like the real API (globe-coordinate value)."""
+    return {
+        "rank": rank,
+        "mainsnak": {
+            "snaktype": "value",
+            "datavalue": {
+                "type": "globecoordinate",
+                "value": {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "altitude": None,
+                    "precision": 1e-05,
+                    "globe": globe,
+                },
+            },
+        },
+    }
+
+
+def time_qualifier(date):
+    """A time-valued qualifier snak, like `+2024-03-01T00:00:00Z`."""
+    return {
+        "snaktype": "value",
+        "datavalue": {
+            "type": "time",
+            "value": {"time": date, "precision": 11, "calendarmodel": "x"},
+        },
+    }
+
+
+def quantity_claim(amount, unit_qid=None, *, qualifiers=None, rank="normal"):
+    """A P2555 (fee) statement. `unit_qid` None means a plain number (unit "1")."""
+    unit = f"http://www.wikidata.org/entity/{unit_qid}" if unit_qid else "1"
+    statement = {
+        "rank": rank,
+        "mainsnak": {
+            "snaktype": "value",
+            "datavalue": {"type": "quantity", "value": {"amount": amount, "unit": unit}},
+        },
+    }
+    if qualifiers:
+        statement["qualifiers"] = {prop: [snak] for prop, snak in qualifiers.items()}
+    return statement
+
+
+def item_claim_with_end(qid, end="+2001-01-01T00:00:00Z"):
+    """An item statement that has ended (qualifier P582)."""
+    statement = item_claim(qid)
+    statement["qualifiers"] = {"P582": [time_qualifier(end)]}
+    return statement
+
+
+def entity(claims, *, revid=1, label=None, description=None, enwiki=None):
+    """A full wbgetentities entity body for the B4 parser."""
+    body = {"type": "item", "id": "Q0", "lastrevid": revid, "claims": claims}
+    if label:
+        body["labels"] = {"en": {"language": "en", "value": label}}
+    if description:
+        body["descriptions"] = {"en": {"language": "en", "value": description}}
+    if enwiki:
+        body["sitelinks"] = {"enwiki": {"site": "enwiki", "title": enwiki, "badges": []}}
+    return body
