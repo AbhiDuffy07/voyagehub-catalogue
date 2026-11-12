@@ -18,6 +18,7 @@ from catalogue.discover.parse import ParsedDump
 from catalogue.discover.tree import Assignment
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
+from catalogue.progress import Progress
 
 WIKIVOYAGE_API = "https://en.wikivoyage.org/w/api.php"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
@@ -63,7 +64,9 @@ def _batches(items: Iterable[str]) -> Iterator[list[str]]:
 def fetch_wikidata_ids(client: PoliteClient, titles: Sequence[str]) -> dict[str, str]:
     """Map Wikivoyage titles to Wikidata IDs. Pages without an item are left out."""
     found: dict[str, str] = {}
-    for batch in _batches(titles):
+    unique = list(dict.fromkeys(titles))
+    progress = Progress("Wikivoyage titles", len(unique))
+    for batch in _batches(unique):
         reply = client.get(
             WIKIVOYAGE_API,
             params={
@@ -81,6 +84,8 @@ def fetch_wikidata_ids(client: PoliteClient, titles: Sequence[str]) -> dict[str,
             title = requested.get(page["title"], page["title"])
             if qid and title in batch:
                 found[title] = qid
+        progress.advance(len(batch))
+    progress.done()
     return found
 
 
@@ -104,7 +109,9 @@ def _values(claims: dict[str, Any], prop: str) -> list[Any]:
 def fetch_entities(client: PoliteClient, qids: Iterable[str]) -> dict[str, EntityFacts]:
     """Fetch P17, P297 and P421 for Wikidata items. Missing items are left out."""
     facts: dict[str, EntityFacts] = {}
-    for batch in _batches(qids):
+    unique = list(dict.fromkeys(qids))
+    progress = Progress("Wikidata entities", len(unique))
+    for batch in _batches(unique):
         entities = client.get(
             WIKIDATA_API,
             params={
@@ -123,6 +130,8 @@ def fetch_entities(client: PoliteClient, qids: Iterable[str]) -> dict[str, Entit
                 iso_codes=tuple(_values(claims, ISO_CODE)),
                 time_zones=tuple(_values(claims, TIME_ZONE)),
             )
+        progress.advance(len(batch))
+    progress.done()
     return facts
 
 

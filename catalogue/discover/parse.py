@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from catalogue.errors import PipelineError
+from catalogue.progress import Progress
 
 STATUSES = ("outline", "usable", "guide", "star")
 # The types seen in the 2026-11-01 dump. An unknown suffix is ignored, so an unrelated template
@@ -150,13 +151,16 @@ def iter_pages(path: Path) -> Iterator[DumpPage]:
 def parse_dump(path: Path) -> ParsedDump:
     articles: dict[str, Article] = {}
     redirects: dict[str, str] = {}
+    progress = Progress("dump pages")
     for element in _stream_pages(path):
+        progress.advance()
         title = normalize_title(_text(element, "{*}title"))
         redirect = element.find("{*}redirect")
         if redirect is not None:
             redirects[title] = normalize_title(redirect.get("title", ""))
         else:
             articles[title] = _article(element, title)
+    progress.done()
     return ParsedDump(articles=articles, redirects=redirects)
 
 

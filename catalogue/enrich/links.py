@@ -16,6 +16,7 @@ from urllib.parse import unquote
 
 from catalogue.enrich.api import api_get
 from catalogue.http import PoliteClient
+from catalogue.progress import Progress
 
 ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 BATCH_SIZE = 50
@@ -117,6 +118,7 @@ def resolve_wikipedia_links(client: PoliteClient, values: Iterable[str]) -> dict
         else:
             wanted.setdefault(_canonical(title), []).append(raw)
 
+    progress = Progress("Wikipedia links", len(wanted))
     for batch in _batches(sorted(wanted)):
         reply = api_get(
             client,
@@ -138,4 +140,6 @@ def resolve_wikipedia_links(client: PoliteClient, values: Iterable[str]) -> dict
             outcome = _classify(title, norm, redirects, pages)
             for raw in wanted[title]:
                 results[raw] = outcome
+        progress.advance(len(batch))
+    progress.done()
     return results

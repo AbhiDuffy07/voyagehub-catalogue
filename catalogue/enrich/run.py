@@ -53,6 +53,7 @@ from catalogue.http import PoliteClient
 from catalogue.listings.output import JsonlWriter, SortedJsonl
 from catalogue.listings.quality import QualityRules, load_rules, parse_coordinate, valid_wikidata
 from catalogue.listings.run import parse_dump_date
+from catalogue.progress import Progress
 
 SCHEMA_VERSION = 1
 LICENCE = "CC0 1.0"
@@ -347,8 +348,10 @@ def run_enrich_wikidata(
 
     # --- listings ----------------------------------------------------------------------------
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
+    progress = Progress("listings", len(listings))
     with SortedJsonl(target / "listing_facts.jsonl") as listing_out:
         for x, (qid, source, link) in zip(listings, listing_ids, strict=True):
+            progress.advance()
             if link is not None:
                 tally.link_status[link.status] += 1
                 tally.link_rows.append(
@@ -427,6 +430,7 @@ def run_enrich_wikidata(
                     **_provenance(qid, item, dump_date=dump_date, read_at=read_at),
                 }
             )
+        progress.done()
         listing_out.finish()
 
     with JsonlWriter(target / "destination_facts.jsonl") as destination_out:
