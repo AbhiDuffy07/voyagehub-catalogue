@@ -163,6 +163,29 @@ def fake_wikipedia(pages, redirects=None, seen=None):
     return answer
 
 
+def fake_wikidata_full(entities, redirects=None, seen=None):
+    """Answer wbgetentities with whole entity bodies (see `entity`). Unknown IDs are missing; an ID
+    in `redirects` comes back as the target's body, with a `redirects` note, like the real API."""
+    redirects = redirects or {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(dict(request.url.params))
+        body = {}
+        for qid in request.url.params["ids"].split("|"):
+            target = redirects.get(qid, qid)
+            if target in entities:
+                item = {**entities[target], "id": target}
+                if qid in redirects:
+                    item["redirects"] = {"from": qid, "to": target}
+                body[qid] = item
+            else:
+                body[qid] = {"id": qid, "missing": ""}
+        return httpx.Response(200, json={"entities": body, "success": 1})
+
+    return answer
+
+
 def entity(claims, *, revid=1, label=None, description=None, enwiki=None):
     """A full wbgetentities entity body for the B4 parser."""
     body = {"type": "item", "id": "Q0", "lastrevid": revid, "claims": claims}
