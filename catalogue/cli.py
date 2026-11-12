@@ -1,7 +1,7 @@
 """Command line: `python -m catalogue <command>`.
 
-Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3;
-the rest arrive one by one in later sessions).
+Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
+enrich-wikidata in B4; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -20,6 +20,7 @@ from catalogue.discover.dump import dump_filename, fetch_dump
 from catalogue.discover.overrides import load_country_iso_overrides
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
+from catalogue.enrich.run import run_enrich_wikidata
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
@@ -91,6 +92,23 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("data"),
         help="folder with the committed slug registry, slugs.json",
     )
+
+    enrich = commands.add_parser(
+        "enrich-wikidata",
+        help="add Wikidata facts to destinations and listings (network; writes local files only)",
+    )
+    enrich.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    enrich.add_argument("--country", help="only this ISO country code (same as fetch-listings)")
+    enrich.add_argument(
+        "--detail", action="append", default=[], metavar="CC", help="write a detail report for CC"
+    )
+    enrich.add_argument(
+        "--discover-dir", type=Path, default=Path("out/discover"), help="where discover wrote"
+    )
+    enrich.add_argument(
+        "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
+    )
+    enrich.add_argument("--out-dir", type=Path, default=Path("out/enrich"))
 
     report = commands.add_parser(
         "report", help="write research files from the discover output (offline, no settings needed)"
@@ -202,6 +220,33 @@ def _fetch_listings(args: argparse.Namespace) -> None:
     print(f"files: {result.output_dir}")
 
 
+def _enrich_wikidata(
+    args: argparse.Namespace,
+    environ: Mapping[str, str] | None,
+    env_file: Path | str | None,
+    client_factory: Callable[[Settings], PoliteClient],
+) -> None:
+    settings = load_settings(environ, env_file)
+    # `discover` always writes the world folder; `fetch-listings --country` adds the suffix.
+    listings_folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    client = client_factory(settings)
+    try:
+        result = run_enrich_wikidata(
+            client,
+            discover_folder=args.discover_dir / args.dump_date,
+            listings_folder=args.listings_dir / listings_folder,
+            out_dir=args.out_dir,
+            dump_date=args.dump_date,
+            today=datetime.now(UTC).date(),
+            country_iso=args.country,
+            detail_countries=args.detail,
+        )
+    finally:
+        client.close()
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _wikivoyage_sitename(client: PoliteClient) -> str:
     response = client.get(SITEINFO_URL, params=SITEINFO_PARAMS)
     try:
@@ -257,6 +302,8 @@ def main(
             _report(args)
         elif args.command == "fetch-listings":
             _fetch_listings(args)
+        elif args.command == "enrich-wikidata":
+            _enrich_wikidata(args, environ, env_file, client_factory)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:

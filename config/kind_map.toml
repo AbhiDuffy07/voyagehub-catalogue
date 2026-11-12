@@ -1,0 +1,77 @@
+# Wikidata class (P31) -> place kind, for enrich-wikidata (B4). Global: nothing here is
+# country-specific. A class that is not listed gives no kind (the place keeps its raw P31 values
+# and the commonest unmapped classes are listed in kind_unmapped.csv). A place whose classes map
+# to two different kinds gets no kind and a `kind_ambiguous` flag; nothing picks between them.
+#
+# First pass, from the India run on dump 20261101 (kind_unmapped.csv, the 110 commonest classes).
+# Every Q-ID below is copied from that file, and its English label (the comment) is the label
+# live Wikidata returned in that run. Classes that are not places visitors go to (railway
+# stations, hotels, towns, districts, airports, hospitals, colleges, ...) are deliberately left
+# out, and so are classes too broad to say anything (building, built structure, tower, lake,
+# mountain, hill). Mapping a class is a judgement call: change one only with the reason.
+#
+# Allowed kinds: sight, museum, religious, fort_palace, park_nature, market, viewpoint,
+# neighbourhood, activity. ("other" is what an unmapped place is.) No class from the India list
+# was clearly a market, viewpoint or activity, so those have no entries yet.
+
+[kinds]
+religious = [
+    "Q842402",    # Hindu temple
+    "Q44539",     # temple
+    "Q32815",     # mosque
+    "Q16970",     # church building
+    "Q2613100",   # Jain temple
+    "Q337986",    # gurdwara
+    "Q54074585",  # Tibetan Buddhist monastery
+    "Q1559394",   # Gompa
+    "Q56242215",  # Catholic cathedral
+    "Q2977",      # cathedral
+    "Q34627",     # synagogue
+    "Q120560",    # minor basilica
+    "Q58621988",  # temple complex
+    "Q844619",    # vihara
+    "Q4588528",   # sacred place
+]
+museum = [
+    "Q33506",     # museum
+    "Q207694",    # art museum
+    "Q17431399",  # national museum
+    "Q588140",    # science museum
+    "Q18704634",  # railway museum
+]
+fort_palace = [
+    "Q1785071",   # fort
+    "Q16560",     # palace
+    "Q57821",     # fortification
+    "Q57831",     # fortress
+]
+park_nature = [
+    "Q22698",     # park
+    "Q46169",     # national park
+    "Q473972",    # protected area
+    "Q1377575",   # wildlife refuge
+    "Q2714144",   # bird sanctuary
+    "Q167346",    # botanical garden
+    "Q1107656",   # garden
+    "Q22746",     # urban park
+    "Q34038",     # waterfall
+    "Q40080",     # beach
+    "Q35509",     # cave
+]
+neighbourhood = [
+    "Q123705",    # neighborhood
+    "Q188509",    # suburb
+]
+sight = [
+    "Q381885",    # tomb
+    "Q162875",    # mausoleum
+    "Q839954",    # archaeological site
+    "Q1081138",   # historic site
+    "Q109607",    # ruins
+    "Q4989906",   # monument
+    "Q5003624",   # memorial
+    "Q1473950",   # stepwell
+    "Q1010155",   # ghat
+    "Q853854",    # clock tower
+    "Q53060",     # gate
+]
