@@ -1,8 +1,8 @@
 # Exact pins. Each was uploaded to PyPI at least 14 days before 2026-11-10 (checked by upload time).
-# Direct dependencies: httpx, mwparserfromhell, psycopg[binary], pydantic, pytest, respx, ruff.
+# Direct dependencies: httpx, mwparserfromhell, psycopg[binary], pydantic, pytest, respx, ruff, tzfpy.
 # The rest are what they pull in. pytest is 9.1.1, not 9.2.0 (9.2.0 was under 14 days old on 2026-11-10).
-# Added for B4c (time zones from coordinates): tzfpy 2.1.1 was uploaded 2026-10-11 (32 days before 2026-11-12),
-# MIT code, ODbL boundary data inside the wheel (2026e), no dependencies. Owner approved 2026-11-12.
+# tzfpy 2.1.1 (B4c, time zones from coordinates, owner approved 2026-11-12) was uploaded 2026-10-11, 32 days before; MIT code,
+# ODbL boundary data inside the wheel, no dependencies.
 annotated-types==0.8.0
 anyio==4.15.1
 certifi==2026.10.23
@@ -15,8 +15,8 @@ iniconfig==2.3.1
 mwparserfromhell==0.7.2
 packaging==26.3
 pluggy==1.7.0
-psycopg-binary==3.3.6
 psycopg==3.3.6
+psycopg-binary==3.3.6
 pydantic==2.14.1
 pydantic_core==2.50.1
 Pygments==2.21.0

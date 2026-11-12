@@ -182,7 +182,8 @@ def verify_enrich_output(
         raise PipelineError(f"manifest.json not found in {folder}; run enrich-wikidata first")
     damaged = "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes)
         recorded_country = manifest["country_filter"]
         recorded = manifest["outputs_sha256"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -204,4 +205,4 @@ def verify_enrich_output(
             raise PipelineError(f"{name} could not be read") from None
         if hashes[name] != recorded.get(name):
             raise PipelineError(f"{name} does not match the enrich-wikidata manifest")
-    return hashlib.sha256(manifest_path.read_bytes()).hexdigest(), hashes
+    return hashlib.sha256(manifest_bytes).hexdigest(), hashes

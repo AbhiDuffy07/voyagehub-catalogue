@@ -18,11 +18,12 @@ Rules, none of them a guess:
 
 Offline and fast: no network, no settings. Local files only, in `out/timezones/<date>[-CC]/`.
 Only zone names are stored, with this credit wherever they are published:
-"Time zones: timezone-boundary-builder, (c) OpenStreetMap contributors, ODbL" (ODbL 1.0).
+"Time zones: timezone-boundary-builder, © OpenStreetMap contributors, ODbL" (ODbL 1.0).
 """
 
 import hashlib
 import importlib.metadata
+import math
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,7 +46,6 @@ ATTRIBUTION = "Time zones: timezone-boundary-builder, © OpenStreetMap contribut
 LICENCE = "ODbL 1.0"
 DESTINATION_ROLES = frozenset({"destination", "destination_outline"})
 NO_COUNTRY = "(none)"
-DISAGREEMENT_SAMPLES = 500
 # Two zone names with the same UTC offset at all of these instants (both sides of daylight saving,
 # two years) are the same zone for our purposes: US/Eastern and America/Toronto, Asia/Calcutta and
 # Asia/Kolkata.
@@ -69,7 +69,7 @@ def lookup_zones(lat: float, lon: float) -> tuple[str, ...]:
 def same_offsets(first: str, second: str) -> bool:
     try:
         a, b = ZoneInfo(first), ZoneInfo(second)
-    except (ValueError, OSError):  # ZoneInfoNotFoundError is an OSError
+    except (KeyError, ValueError, OSError, TypeError):  # ZoneInfoNotFoundError is a KeyError
         return False
     return all(i.astimezone(a).utcoffset() == i.astimezone(b).utcoffset() for i in _SAMPLE_INSTANTS)
 
@@ -99,7 +99,8 @@ class TimezoneResult:
             f"destinations: {t['destinations']}; zone from Wikidata: {t['from_wikidata_item']} "
             f"(own) + {t['from_country_single_zone']} (country); from coordinates: "
             f"{t['from_coordinates']}; still without a zone: {t['still_none']}",
-            f"country zone replaced by the coordinates: {t['replaced_country_zone']}; "
+            f"country zone corrected by the coordinates: {t['replaced_country_zone']} "
+            f"(+ {t['alias_normalised']} renamed to the exact name); "
             f"own Wikidata zone contradicted: {t['disagreements']}",
         ]
         if t["flags"]:
@@ -108,7 +109,21 @@ class TimezoneResult:
 
 
 def _number(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _point(row: dict[str, Any]) -> tuple[float | None, float | None, bool]:
+    """(latitude, longitude, bad). One coordinate alone, or none, is simply no point. A value that
+    is not a finite number or lies outside the globe is bad data: no lookup, and never echoed."""
+    raw_lat, raw_lon = row.get("coord_lat"), row.get("coord_long")
+    if raw_lat is None or raw_lon is None:
+        return None, None, False
+    lat, lon = _number(raw_lat), _number(raw_lon)
+    if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None, None, True
+    return lat, lon, False
 
 
 def _destination_rows(folder: Path) -> list[dict[str, Any]]:
@@ -131,14 +146,20 @@ def _decide(
     known: frozenset[str],
     data_version: str,
 ) -> dict[str, Any]:
-    existing, existing_basis = row.get("timezone"), row.get("timezone_basis")
-    lat, lon = _number(row.get("coord_lat")), _number(row.get("coord_long"))
+    wikidata_name = row.get("timezone") if isinstance(row.get("timezone"), str) else None
+    existing, existing_basis = wikidata_name or None, row.get("timezone_basis")
+    lat, lon, bad = _point(row)
     has_point = lat is not None and lon is not None
     candidate, problem = (None, None)
     if has_point:
         candidate, problem = _coordinate_zone(lat, lon, locate, known)  # type: ignore[arg-type]
 
     flags: list[str] = []
+    if existing and existing not in known:
+        # Wikidata's P6687 is a free string; a name the time-zone database does not know is not
+        # trusted, whatever its basis, and the coordinates get their chance.
+        flags.append("timezone_invalid_wikidata_name")
+        existing = None
     if existing and existing_basis == "country_single_zone":
         # The country's only IANA zone is a guess for a place inside it (Wikidata names `US/Eastern`
         # as Canada's one zone, which would put Vancouver on Eastern time). A single clear zone from
@@ -146,7 +167,13 @@ def _decide(
         # keeps the Wikidata value and says so.
         if candidate and candidate != existing:
             zone, basis = candidate, "coordinates"
-            flags.append("timezone_replaced_country_zone")
+            # A different name for the same offsets is only a rename; a different offset is a
+            # real correction. They are counted apart so the correction count means something.
+            flags.append(
+                "timezone_alias_normalised"
+                if same_offsets(candidate, existing)
+                else "timezone_replaced_country_zone"
+            )
         else:
             zone, basis = existing, existing_basis
     elif existing:
@@ -158,7 +185,13 @@ def _decide(
         zone, basis = candidate, "coordinates"
     else:
         zone, basis = None, None
-        flags.append(problem if has_point and problem else "timezone_unknown")
+        flags.append(
+            problem
+            if has_point and problem
+            else "timezone_bad_coordinates"
+            if bad
+            else "timezone_unknown"
+        )
 
     derived = basis == "coordinates"
     return {
@@ -168,7 +201,7 @@ def _decide(
         "tree_country_iso": row.get("tree_country_iso"),
         "timezone": zone,
         "timezone_basis": basis,
-        "wikidata_timezone": existing or None,
+        "wikidata_timezone": wikidata_name or None,
         "coordinate_timezone": candidate,
         "coord_lat": lat,
         "coord_long": lon,
@@ -222,18 +255,19 @@ def run_derive_timezone(
         c[r["timezone_basis"] or "none"] += 1
         if "timezone_replaced_country_zone" in r["flags"]:
             c["replaced_country_zone"] += 1
+        if "timezone_alias_normalised" in r["flags"]:
+            c["alias_normalised"] += 1
         if "timezone_disagrees" in r["flags"]:
             c["disagreements"] += 1
-            if len(disagreements) < DISAGREEMENT_SAMPLES:
-                disagreements.append(
-                    [
-                        r["wikivoyage_page_id"],
-                        _safe_cell(r["title"] or ""),
-                        _safe_cell(country),
-                        _safe_cell(r["wikidata_timezone"] or ""),
-                        _safe_cell(r["coordinate_timezone"] or ""),
-                    ]
-                )
+            disagreements.append(
+                [
+                    r["wikivoyage_page_id"],
+                    _safe_cell(r["title"] or ""),
+                    _safe_cell(country),
+                    _safe_cell(r["wikidata_timezone"] or ""),
+                    _safe_cell(r["coordinate_timezone"] or ""),
+                ]
+            )
         flag_counts.update(r["flags"])
 
     def total(key: str) -> int:
@@ -246,6 +280,7 @@ def run_derive_timezone(
         "from_coordinates": total("coordinates"),
         "still_none": total("none"),
         "replaced_country_zone": total("replaced_country_zone"),
+        "alias_normalised": total("alias_normalised"),
         "disagreements": total("disagreements"),
         "flags": dict(sorted(flag_counts.items())),
     }
@@ -260,6 +295,7 @@ def run_derive_timezone(
                 "from_coordinates",
                 "still_none",
                 "replaced_country_zone",
+                "alias_normalised",
                 "disagreements",
             ],
             [
@@ -271,6 +307,7 @@ def run_derive_timezone(
                     c["coordinates"],
                     c["none"],
                     c["replaced_country_zone"],
+                    c["alias_normalised"],
                     c["disagreements"],
                 ]
                 for country, c in sorted(counts.items())
@@ -318,7 +355,8 @@ def _report(totals: dict[str, Any], data_version: str, dump_date: str) -> str:
         f"- zone from Wikidata (country's single zone): {totals['from_country_single_zone']}",
         f"- zone from coordinates: {totals['from_coordinates']}",
         f"- still without a zone: {totals['still_none']}",
-        f"- country's single zone replaced by the coordinates: {totals['replaced_country_zone']}",
+        f"- country's single zone corrected by the coordinates: {totals['replaced_country_zone']}",
+        f"- country's single zone renamed (same offsets): {totals['alias_normalised']}",
         f"- the place's own Wikidata zone contradicted: {totals['disagreements']}",
         "",
         "## Flags",

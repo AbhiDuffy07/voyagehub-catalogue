@@ -8,6 +8,7 @@ from catalogue.enrich.timezones import (
     ATTRIBUTION,
     lookup_zones,
     run_derive_timezone,
+    same_offsets,
 )
 from catalogue.errors import PipelineError
 from tests.enrichfixture import destination_row, write_enrich_output
@@ -163,7 +164,7 @@ def test_a_different_name_for_the_same_offsets_is_not_a_disagreement(tmp_path):
     assert got["timezone"] == "Asia/Calcutta" and got["flags"] == []
 
 
-def test_a_countrys_zone_with_the_same_offsets_still_gives_way_to_the_more_exact_name(tmp_path):
+def test_a_countrys_zone_with_the_same_offsets_gets_the_exact_name_flagged_as_an_alias(tmp_path):
     folder = write_enrich_output(
         tmp_path / "enrich" / "20261101",
         destinations=[
@@ -172,9 +173,11 @@ def test_a_countrys_zone_with_the_same_offsets_still_gives_way_to_the_more_exact
         listings=[],
         country_filter=None,
     )
-    got = jsonl(run(folder, tmp_path).output_dir / "destination_timezones.jsonl")[0]
+    result_ = run(folder, tmp_path)
+    got = jsonl(result_.output_dir / "destination_timezones.jsonl")[0]
     assert got["timezone"] == "Asia/Kolkata" and got["timezone_basis"] == "coordinates"
-    assert got["flags"] == ["timezone_replaced_country_zone"]
+    assert got["flags"] == ["timezone_alias_normalised"]
+    assert result_.totals["alias_normalised"] == 1 and result_.totals["replaced_country_zone"] == 0
 
 
 def test_a_countrys_zone_stays_when_the_coordinates_give_no_single_zone(tmp_path):
@@ -347,3 +350,85 @@ def test_the_real_lookup_takes_latitude_first_and_knows_land_and_sea():
     assert lookup_zones(52.52, 13.405) == ("Europe/Berlin",)
     assert lookup_zones(40.71, -74.0) == ("America/New_York",)
     assert all(zone.startswith("Etc/") for zone in lookup_zones(0.0, -30.0))
+
+
+@pytest.mark.parametrize(
+    ("lat", "lon"),
+    [
+        (True, 10.0),
+        ("26.9", "75.8"),
+        (float("nan"), 75.8),
+        (float("inf"), 75.8),
+        (91.0, 75.8),
+        (26.9, 181.0),
+    ],
+)
+def test_bad_coordinates_are_flagged_as_bad_data_and_never_echoed(tmp_path, lat, lon):
+    odd = {**row(1, "Odd", None), "coord_lat": lat, "coord_long": lon}
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101", destinations=[odd], listings=[], country_filter=None
+    )
+    result_ = run(folder, tmp_path)
+    got = jsonl(result_.output_dir / "destination_timezones.jsonl")[0]
+    assert got["timezone"] is None and got["flags"] == ["timezone_bad_coordinates"]
+    assert got["coord_lat"] is None and got["coord_long"] is None
+    text_ = (result_.output_dir / "destination_timezones.jsonl").read_text(encoding="utf-8")
+    assert "NaN" not in text_ and "Infinity" not in text_
+
+
+def test_one_coordinate_alone_is_no_point(tmp_path):
+    half = {**row(1, "Half", None), "coord_lat": 26.9, "coord_long": None}
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101", destinations=[half], listings=[], country_filter=None
+    )
+    got = jsonl(run(folder, tmp_path).output_dir / "destination_timezones.jsonl")[0]
+    assert got["flags"] == ["timezone_unknown"]
+
+
+@pytest.mark.parametrize("point", [SEA, NOWHERE, EMPTY])
+def test_a_countrys_zone_stays_when_the_coordinates_give_sea_or_an_unknown_name(tmp_path, point):
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101",
+        destinations=[row(1, "Kept", point, timezone="Asia/Kolkata", basis="country_single_zone")],
+        listings=[],
+        country_filter=None,
+    )
+    got = jsonl(run(folder, tmp_path).output_dir / "destination_timezones.jsonl")[0]
+    assert (got["timezone"], got["timezone_basis"], got["flags"]) == (
+        "Asia/Kolkata",
+        "country_single_zone",
+        [],
+    )
+
+
+def test_a_wikidata_zone_name_the_database_does_not_know_is_not_trusted(tmp_path):
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101",
+        destinations=[row(1, "Odd name", JAIPUR, timezone="Mars/Olympus", basis="wikidata_item")],
+        listings=[],
+        country_filter=None,
+    )
+    got = jsonl(run(folder, tmp_path).output_dir / "destination_timezones.jsonl")[0]
+    assert (got["timezone"], got["timezone_basis"]) == ("Asia/Kolkata", "coordinates")
+    assert got["flags"] == ["timezone_invalid_wikidata_name"]
+    assert got["wikidata_timezone"] == "Mars/Olympus"
+
+
+def test_same_offsets_never_raises_on_odd_names():
+    assert same_offsets("Asia/Calcutta", "Asia/Kolkata") is True
+    assert same_offsets("Asia/Dhaka", "Asia/Kolkata") is False
+    assert same_offsets(123, "Asia/Kolkata") is False  # type: ignore[arg-type]
+    assert same_offsets("Mars/Olympus", "Asia/Kolkata") is False
+    assert same_offsets("", "Asia/Kolkata") is False
+
+
+def test_every_disagreement_is_listed_not_just_a_sample(tmp_path):
+    many = [
+        row(n, f"Place {n}", JAIPUR, timezone="Asia/Dhaka", basis="wikidata_item")
+        for n in range(1, 601)
+    ]
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101", destinations=many, listings=[], country_filter=None
+    )
+    done = run(folder, tmp_path)
+    assert len(table(done.output_dir / "timezone_disagreements.csv")) == 600
