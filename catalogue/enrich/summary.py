@@ -24,6 +24,7 @@ from urllib.parse import quote
 from catalogue.enrich.api import api_get
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
+from catalogue.progress import Progress
 
 ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 BATCH_SIZE = 20  # the API limit for extracts
@@ -170,7 +171,9 @@ def fetch_summaries(
     """
     if workers < 1:
         raise ValueError("workers must be at least 1")
-    pending = iter(list(_batches(sorted(set(titles)))))
+    batches = list(_batches(sorted(set(titles))))
+    pending = iter(batches)
+    progress = Progress("Wikipedia titles", sum(len(b) for b in batches))
     results: dict[str, PageSummary] = {}
     in_flight: dict[Future[dict[str, Any]], list[str]] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -190,11 +193,13 @@ def fetch_summaries(
                     read = future.result()
                     for requested in batch:
                         results[requested] = _summary(requested, read)
+                    progress.advance(len(batch))
                     start_next()
         except BaseException:
             for future in in_flight:
                 future.cancel()
             raise
+    progress.done()
     return results
 
 

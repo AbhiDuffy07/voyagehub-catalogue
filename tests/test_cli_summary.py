@@ -91,3 +91,11 @@ def test_a_bad_dump_date_is_one_clear_error(capsys):
     argv = ["wikipedia-summary", "--dump-date", "2026-11-01"]
     code = main(argv, environ={"CONTACT_EMAIL": EMAIL}, env_file=None, client_factory=quick_client)
     assert code == 1 and "YYYYMMDD" in capsys.readouterr().err
+
+
+def test_progress_lines_show_counts_and_no_text(enrich_dir, api, capsys):
+    code, out = summarise(enrich_dir, capsys)
+    assert code == 0 and out.err == ""
+    progress = [line for line in out.out.splitlines() if line.startswith("progress:")]
+    assert "progress: Wikipedia titles 2 of 2 (100%) done" in progress
+    assert not any("palaces" in line or "Jaipur" in line for line in progress)

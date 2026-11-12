@@ -98,7 +98,7 @@ Small items found in review of `fetch-listings`, not yet done:
 
 ## Progress lines
 
-Long jobs (`discover`, `fetch-listings`, `enrich-wikidata`) print a count-only line at most every 30 seconds and a final `done` line, such as `progress: Wikidata items 12500 of 111984 (11%)`, so a long run can be told from a hung one. A line holds only a fixed label and whole numbers, never a title, row text, address or the User-Agent, and goes to standard output next to the job's summary (standard error stays for errors). The helper is `catalogue/progress.py`.
+Long jobs (`discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`) print a count-only line at most every 30 seconds and a final `done` line, such as `progress: Wikidata items 12500 of 111984 (11%)`, so a long run can be told from a hung one. A line holds only a fixed label and whole numbers, never a title, row text, address or the User-Agent, and goes to standard output next to the job's summary (standard error stays for errors). The helper is `catalogue/progress.py`.
 
 ## Politeness towards Wikimedia
 
