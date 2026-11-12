@@ -95,6 +95,31 @@ def time_qualifier(date):
     }
 
 
+def item_snak(qid):
+    """An item-valued qualifier snak."""
+    return {
+        "snaktype": "value",
+        "datavalue": {
+            "type": "wikibase-entityid",
+            "value": {"entity-type": "item", "id": qid},
+        },
+    }
+
+
+def part_of_whs_claim(parent_qid=None, *, end=None, rank="normal"):
+    """A P1435 statement "part of UNESCO World Heritage Site" (Q43113623). Wikidata records the
+    parent site as a P361 qualifier on this statement (checked on Amber Fort, 2026-11-12)."""
+    statement = item_claim("Q43113623", rank=rank)
+    qualifiers = {}
+    if parent_qid:
+        qualifiers["P361"] = [item_snak(parent_qid)]
+    if end:
+        qualifiers["P582"] = [time_qualifier(end)]
+    if qualifiers:
+        statement["qualifiers"] = qualifiers
+    return statement
+
+
 def quantity_claim(amount, unit_qid=None, *, qualifiers=None, rank="normal"):
     """A P2555 (fee) statement. `unit_qid` None means a plain number (unit "1")."""
     unit = f"http://www.wikidata.org/entity/{unit_qid}" if unit_qid else "1"

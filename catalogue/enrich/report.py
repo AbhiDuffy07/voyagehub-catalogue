@@ -339,6 +339,14 @@ def write_all(
         target / "heritage_designations.csv",
         _csv_text(["country_iso", "designation_qid", "label", "items"], heritage_rows),
     )
+    component_rows = [
+        [country, parent, _safe_cell(_label(items, parent)), len(ids)]
+        for (country, parent), ids in sorted(tally.components.items())
+    ]
+    write_text(
+        target / "unesco_components.csv",
+        _csv_text(["country_iso", "parent_qid", "parent_label", "components"], component_rows),
+    )
     unmapped = sorted(tally.unmapped.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:TOP_UNMAPPED]
     write_text(
         target / "kind_unmapped.csv",

@@ -85,6 +85,7 @@ class Tally:
     fee_items: dict[tuple[str, str], ItemFacts] = field(default_factory=dict)
     timezone_basis: Counter = field(default_factory=Counter)
     unesco: Counter = field(default_factory=Counter)
+    components: dict[tuple[str, str], set[str]] = field(default_factory=lambda: defaultdict(set))
 
     def count(self, country: str | None, subject: str) -> CoordCount:
         return self.coords.setdefault((country or NO_COUNTRY, subject), CoordCount())
@@ -122,17 +123,23 @@ def _provenance(
 
 
 def _item_fields(
-    item: ItemFacts | None, kind_map: Mapping[str, str], tally: Tally, key_country: str | None
+    item: ItemFacts | None,
+    kind_map: Mapping[str, str],
+    tally: Tally,
+    key_country: str | None,
+    items: Mapping[str, ItemFacts],
 ) -> tuple[dict[str, Any], list[str]]:
     """The facts every row carries when it has an item, and the flags found while reading them."""
     flags: list[str] = []
-    unesco = unesco_status(item)
+    unesco = unesco_status(item, items)
     kind, kind_flags = kind_of(item, kind_map)
     flags += [*unesco.flags, *kind_flags]
     if item is not None:
         tally.unesco[
             "unesco" if unesco.is_unesco else "component" if unesco.component else "no"
         ] += 1
+        if unesco.component and unesco.parent_qid:
+            tally.components[(key_country or NO_COUNTRY, unesco.parent_qid)].add(item.qid)
         for designation in item.heritage:
             tally.heritage[(key_country or NO_COUNTRY, designation)].add(item.qid)
         if kind is None:
@@ -142,6 +149,8 @@ def _item_fields(
     fields = {
         "is_unesco": unesco.is_unesco,
         "unesco_component": unesco.component,
+        "unesco_parent_qid": unesco.parent_qid,
+        "unesco_parent_label": unesco.parent_label,
         "heritage": list(item.heritage) if item else [],
         "instance_of": list(item.instance_of) if item else [],
         "kind": kind,
@@ -195,7 +204,7 @@ def _check_world_heritage_label(items: Mapping[str, ItemFacts]) -> None:
 def _references(items: Mapping[str, ItemFacts]) -> set[str]:
     wanted = set(EXPECTED_LABELS)
     for item in items.values():
-        wanted.update(item.instance_of, item.heritage, item.time_zones)
+        wanted.update(item.instance_of, item.heritage, item.time_zones, item.whs_parents)
         wanted.update(f.unit_qid for f in item.fees if f.unit_qid)
     return wanted - set(items)
 
@@ -351,7 +360,7 @@ def run_enrich_wikidata(
             if decision.filled:
                 counts.filled += 1
                 counts.filled_via_link += source == "wikipedia_link"
-            fields, extra = _item_fields(item, kind_map, tally, x.country_iso)
+            fields, extra = _item_fields(item, kind_map, tally, x.country_iso, items)
             flags = sorted({*decision.flags, *extra})
             counts.flags.update(flags)
             if item is not None and x.kind in FEE_KINDS:
@@ -470,7 +479,7 @@ def _article_row(
         zone = timezone_of(item, items, country_item)
         flags += zone.flags
         tally.timezone_basis[zone.basis or "none"] += 1
-    fields, extra = _item_fields(item, kind_map, tally, a.tree_country_iso)
+    fields, extra = _item_fields(item, kind_map, tally, a.tree_country_iso, items)
     flags += extra
     coordinate = _coordinate_fields(own, decision)
     if decision is None and item is not None and item.coordinate is not None:

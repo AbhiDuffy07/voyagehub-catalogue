@@ -7,10 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from catalogue.enrich.claims import ItemFacts
+from catalogue.enrich.claims import PART_OF_WORLD_HERITAGE_SITE, ItemFacts
 
 WORLD_HERITAGE_SITE = "Q9259"  # labels checked against live Wikidata at the start of every run
-PART_OF_WORLD_HERITAGE_SITE = "Q43113623"
 FRESH_YEARS = 2  # the design's 2-year rule for prices, applied to counting only
 
 
@@ -19,17 +18,24 @@ class UnescoStatus:
     is_unesco: bool  # the item is itself a World Heritage Site
     component: bool  # the item is marked as part of one (a serial site's component)
     flags: tuple[str, ...]
+    parent_qid: str | None = None  # the site a component belongs to, when Wikidata names one
+    parent_label: str | None = None  # that site's English label
 
 
-def unesco_status(item: ItemFacts | None) -> UnescoStatus:
-    """`is_unesco` is true only when the item has the World Heritage designation (P1435) AND a
-    World Heritage ID (P757); having just one is flagged and is not enough, so a mistake in either
-    cannot decide the badge.
+def unesco_status(
+    item: ItemFacts | None, parents: Mapping[str, ItemFacts] | None = None
+) -> UnescoStatus:
+    """`is_unesco` is true only when the item has the World Heritage designation (P1435 = Q9259)
+    AND a World Heritage ID (P757); having just one is flagged and is not enough, so a mistake in
+    either cannot decide the badge.
 
     A component of a serial site (Amber Fort, one of the Hill Forts of Rajasthan) is marked "part
-    of UNESCO World Heritage Site" instead. That is kept apart as `component`, never folded into
-    `is_unesco`: whether a component earns the badge is the owner's call. A component may carry
-    the site's ID without a flag."""
+    of UNESCO World Heritage Site" instead. That is `component`, never folded into `is_unesco`,
+    and it carries the parent site's ID and label so it can be worded accurately ("Part of UNESCO
+    World Heritage Site: <site>"). The parent comes from the designation's own P361 qualifier:
+    none or several give no parent and a flag, and a parent that is not itself a World Heritage
+    Site is kept but flagged. `parents` holds the fetched items; without it the parent is not
+    checked. A component may carry the site's ID without a flag."""
     if item is None:
         return UnescoStatus(False, False, ())
     designated = WORLD_HERITAGE_SITE in item.heritage
@@ -39,7 +45,18 @@ def unesco_status(item: ItemFacts | None) -> UnescoStatus:
         return UnescoStatus(True, False, ())
     if designated or (identified and not component):
         return UnescoStatus(False, False, ("unesco_inconsistent",))
-    return UnescoStatus(False, component, ())
+    if not component:
+        return UnescoStatus(False, False, ())
+    if not item.whs_parents:
+        return UnescoStatus(False, True, ("unesco_parent_missing",))
+    if len(item.whs_parents) > 1:
+        return UnescoStatus(False, True, ("unesco_parent_ambiguous",))
+    parent_qid = item.whs_parents[0]
+    if parents is None:
+        return UnescoStatus(False, True, (), parent_qid)
+    parent = parents.get(parent_qid)
+    flags = () if parent and WORLD_HERITAGE_SITE in parent.heritage else ("unesco_parent_not_whs",)
+    return UnescoStatus(False, True, flags, parent_qid, parent.label if parent else None)
 
 
 def kind_of(

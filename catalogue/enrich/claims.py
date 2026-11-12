@@ -29,6 +29,8 @@ CURRENCY_CODE = "P498"
 POINT_IN_TIME = "P585"
 START_TIME = "P580"
 END_TIME = "P582"
+PART_OF = "P361"
+PART_OF_WORLD_HERITAGE_SITE = "Q43113623"  # "part of UNESCO World Heritage Site"
 
 EARTH = "http://www.wikidata.org/entity/Q2"
 _ENTITY_URL = "http://www.wikidata.org/entity/"
@@ -62,6 +64,7 @@ class ItemFacts:
     countries: tuple[str, ...]
     instance_of: tuple[str, ...]
     heritage: tuple[str, ...]
+    whs_parents: tuple[str, ...]  # the sites a component is part of (P361 on its designation)
     time_zones: tuple[str, ...]
     iana_zones: tuple[str, ...]
     currency_codes: tuple[str, ...]
@@ -95,6 +98,26 @@ def _items(claims: Mapping[str, Any], prop: str) -> tuple[str, ...]:
         if isinstance(qid, str) and qid not in found:
             found.append(qid)
     return tuple(found)
+
+
+def _whs_parents(claims: Mapping[str, Any]) -> tuple[str, ...]:
+    """Where a component of a World Heritage Site says which site it belongs to: the P361 ("part
+    of") qualifier on its current "part of UNESCO World Heritage Site" designation."""
+    found: set[str] = set()
+    for statement in _usable(claims.get(HERITAGE, [])):
+        if END_TIME in statement.get("qualifiers", {}):
+            continue
+        value = _datavalue(statement)
+        if not isinstance(value, dict) or value.get("id") != PART_OF_WORLD_HERITAGE_SITE:
+            continue
+        for snak in statement.get("qualifiers", {}).get(PART_OF, []):
+            parent = (
+                snak.get("datavalue", {}).get("value") if snak.get("snaktype") == "value" else None
+            )
+            qid = parent.get("id") if isinstance(parent, dict) else None
+            if isinstance(qid, str):
+                found.add(qid)
+    return tuple(sorted(found, key=lambda q: int(q[1:]) if q[1:].isdigit() else 0))
 
 
 def _strings(claims: Mapping[str, Any], prop: str) -> tuple[str, ...]:
@@ -177,6 +200,7 @@ def parse_item(qid: str, entity: Mapping[str, Any]) -> ItemFacts:
         countries=_items(claims, COUNTRY),
         instance_of=_items(claims, INSTANCE_OF),
         heritage=_items(claims, HERITAGE),
+        whs_parents=_whs_parents(claims),
         time_zones=_items(claims, TIME_ZONE),
         iana_zones=_strings(claims, IANA_ZONE),
         currency_codes=_strings(claims, CURRENCY_CODE),

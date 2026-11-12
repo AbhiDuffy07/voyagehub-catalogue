@@ -5,6 +5,7 @@ from tests.apifakes import (
     entity,
     item_claim,
     item_claim_with_end,
+    part_of_whs_claim,
     quantity_claim,
     string_claim,
     time_qualifier,
@@ -136,3 +137,33 @@ def test_a_time_with_odd_shape_gives_no_date_not_an_error():
     broken = {"snaktype": "value", "datavalue": {"type": "time", "value": {"time": "garbage"}}}
     facts = parse({"P2555": [quantity_claim("+5", None, qualifiers={"P585": broken})]})
     assert facts.fees[0].point_in_time is None
+
+
+def test_the_parent_site_of_a_component_is_the_p361_qualifier_of_its_designation():
+    facts = parse({"P1435": [part_of_whs_claim("Q10428494")]})
+    assert facts.heritage == ("Q43113623",)
+    assert facts.whs_parents == ("Q10428494",)
+
+
+def test_several_parents_are_all_kept_sorted_and_without_duplicates():
+    facts = parse(
+        {"P1435": [part_of_whs_claim("Q20"), part_of_whs_claim("Q10"), part_of_whs_claim("Q20")]}
+    )
+    assert facts.whs_parents == ("Q10", "Q20")
+
+
+def test_a_designation_without_a_parent_qualifier_has_no_parent():
+    assert parse({"P1435": [part_of_whs_claim()]}).whs_parents == ()
+
+
+def test_an_ended_or_deprecated_part_of_statement_gives_no_parent():
+    ended = part_of_whs_claim("Q10", end="+2001-01-01T00:00:00Z")
+    gone = part_of_whs_claim("Q11", rank="deprecated")
+    assert parse({"P1435": [ended, gone]}).whs_parents == ()
+
+
+def test_other_designations_never_give_a_parent():
+    # a P361 qualifier on some other designation says nothing about a World Heritage Site
+    other = part_of_whs_claim("Q10")
+    other["mainsnak"]["datavalue"]["value"]["id"] = "Q17047640"
+    assert parse({"P1435": [other]}).whs_parents == ()

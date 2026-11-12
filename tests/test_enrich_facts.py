@@ -10,6 +10,7 @@ from tests.apifakes import (
     entity,
     item_claim,
     item_claim_with_end,
+    part_of_whs_claim,
     quantity_claim,
     string_claim,
     time_qualifier,
@@ -51,30 +52,68 @@ def test_unknown_item_is_not_unesco_and_not_flagged():
     assert unesco_status(None) == UnescoStatus(False, False, ())
 
 
-def test_a_component_of_a_world_heritage_site_is_marked_apart_not_as_unesco():
-    # Amber Fort: Wikidata says "part of UNESCO World Heritage Site", not the site itself.
-    component = item({"P1435": [item_claim(PART_OF)]})
-    assert unesco_status(component) == UnescoStatus(False, True, ())
+PARENT = "Q10428494"
 
 
-def test_a_component_may_carry_the_world_heritage_id_without_a_flag():
-    component = item({"P1435": [item_claim(PART_OF)], "P757": [string_claim("247")]})
-    assert unesco_status(component) == UnescoStatus(False, True, ())
+def parent_site(label="Hill Forts of Rajasthan", whs=True, qid=PARENT):
+    claims = {"P1435": [item_claim("Q9259")]} if whs else {}
+    return {qid: parse_item(qid, entity(claims, label=label))}
+
+
+def component(*parents, **extra):
+    claims = {"P1435": [part_of_whs_claim(q) for q in parents] or [part_of_whs_claim()], **extra}
+    return item(claims)
+
+
+def test_a_component_is_marked_apart_with_its_parent_site_id_and_label():
+    status = unesco_status(component(PARENT), parent_site())
+    assert status == UnescoStatus(False, True, (), PARENT, "Hill Forts of Rajasthan")
+
+
+def test_a_component_may_carry_a_world_heritage_id_without_a_flag():
+    status = unesco_status(component(PARENT, P757=[string_claim("247rev-005")]), parent_site())
+    assert (status.is_unesco, status.component, status.flags) == (False, True, ())
+
+
+def test_a_component_without_a_parent_qualifier_is_flagged_and_has_no_parent():
+    status = unesco_status(component(), parent_site())
+    assert status == UnescoStatus(False, True, ("unesco_parent_missing",), None, None)
+
+
+def test_a_component_with_two_parents_is_flagged_and_none_is_picked():
+    status = unesco_status(component(PARENT, "Q4527"), parent_site())
+    assert status == UnescoStatus(False, True, ("unesco_parent_ambiguous",), None, None)
+
+
+def test_a_parent_that_is_not_itself_a_world_heritage_site_is_flagged_but_kept():
+    status = unesco_status(component(PARENT), parent_site(whs=False))
+    assert status.flags == ("unesco_parent_not_whs",)
+    assert (status.parent_qid, status.parent_label) == (PARENT, "Hill Forts of Rajasthan")
+
+
+def test_a_parent_that_was_not_fetched_is_flagged_with_no_label():
+    status = unesco_status(component(PARENT), {})
+    assert status.flags == ("unesco_parent_not_whs",)
+    assert (status.parent_qid, status.parent_label) == (PARENT, None)
 
 
 def test_an_item_that_is_both_the_site_and_marked_part_of_is_the_site():
     both = item(
         {
-            "P1435": [item_claim("Q9259"), item_claim(PART_OF)],
+            "P1435": [item_claim("Q9259"), part_of_whs_claim(PARENT)],
             "P757": [string_claim("247")],
         }
     )
-    assert unesco_status(both) == UnescoStatus(True, False, ())
+    assert unesco_status(both, parent_site()) == UnescoStatus(True, False, ())
 
 
 def test_an_ended_part_of_designation_is_not_a_component():
-    ended = item({"P1435": [item_claim_with_end(PART_OF)]})
-    assert unesco_status(ended) == UnescoStatus(False, False, ())
+    ended = item({"P1435": [part_of_whs_claim(PARENT, end="+2001-01-01T00:00:00Z")]})
+    assert unesco_status(ended, parent_site()) == UnescoStatus(False, False, ())
+
+
+def test_parents_are_looked_up_only_when_given():
+    assert unesco_status(component(PARENT)).parent_qid == PARENT
 
 
 # --- kind ---------------------------------------------------------------------------------------

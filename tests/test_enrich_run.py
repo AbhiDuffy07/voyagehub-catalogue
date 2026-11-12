@@ -15,6 +15,7 @@ from tests.apifakes import (
     fake_wikipedia,
     fake_wikivoyage,
     item_claim,
+    part_of_whs_claim,
     quantity_claim,
     string_claim,
     time_qualifier,
@@ -97,7 +98,10 @@ ENTITIES = {
     FORT_CLASS: entity({}, label="fort"),
     WHS: entity({}, label="World Heritage Site"),
     PART_OF: entity({}, label="part of UNESCO World Heritage Site"),
-    "Q105": entity(in_india(("P1435", [item_claim(PART_OF)]), ("P757", [string_claim("247")]))),
+    "Q105": entity(
+        in_india(("P1435", [part_of_whs_claim("Q9100")]), ("P757", [string_claim("247rev-005")]))
+    ),
+    "Q9100": entity({"P1435": [item_claim(WHS)]}, label="Hill Forts of Rajasthan"),
 }
 
 
@@ -354,7 +358,7 @@ def test_requests_are_batched_sorted_and_the_second_pass_asks_for_referenced_ite
     batches = [p["ids"].split("|") for p in seen]
     assert all(len(b) <= 50 for b in batches)
     asked = {q for b in batches for q in b}
-    assert {TZ_ITEM, RUPEE, FORT_CLASS, WHS} <= asked
+    assert {TZ_ITEM, RUPEE, FORT_CLASS, WHS, "Q9100"} <= asked
     assert "Q1x" not in asked
 
 
@@ -426,6 +430,10 @@ def test_a_country_run_ignores_articles_of_other_countries(client, tmp_path):
 def test_a_component_of_a_world_heritage_site_is_marked_apart(result):
     row = listings(result)[(1, 12)]
     assert row["unesco_component"] is True and row["is_unesco"] is False
+    assert (row["unesco_parent_qid"], row["unesco_parent_label"]) == (
+        "Q9100",
+        "Hill Forts of Rajasthan",
+    )
     assert row["flags"] == []
     assert listings(result)[(1, 1)]["unesco_component"] is False
 
@@ -436,3 +444,20 @@ def test_a_changed_part_of_label_stops_the_run(client, folders, tmp_path):
         mock_all(entities=wrong)
         with pytest.raises(PipelineError, match=PART_OF):
             run(client, folders, tmp_path)
+
+
+def test_components_are_listed_by_parent_site(result):
+    rows = table(result.output_dir / "unesco_components.csv")
+    assert rows == [
+        {
+            "country_iso": "IN",
+            "parent_qid": "Q9100",
+            "parent_label": "Hill Forts of Rajasthan",
+            "components": "1",
+        }
+    ]
+
+
+def test_an_item_that_is_not_a_component_has_no_parent_fields(result):
+    row = listings(result)[(1, 1)]
+    assert row["unesco_parent_qid"] is None and row["unesco_parent_label"] is None
