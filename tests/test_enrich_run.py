@@ -324,7 +324,7 @@ def test_heritage_and_unmapped_class_reports(result):
 def test_manifest_records_inputs_rules_and_output_hashes(result):
     manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["country_filter"] == "IN" and manifest["dump_date"] == "20261101"
-    assert manifest["enrich_rules_version"] == 1 and manifest["quality_rules_version"] == 2
+    assert manifest["enrich_rules_version"] == 2 and manifest["quality_rules_version"] == 2
     assert len(manifest["listings_manifest_sha256"]) == 64
     assert set(manifest["outputs_sha256"]) >= {"destination_facts.jsonl", "listing_facts.jsonl"}
     assert manifest["totals"]["listings"]["filled"] == 2
@@ -461,3 +461,69 @@ def test_components_are_listed_by_parent_site(result):
 def test_an_item_that_is_not_a_component_has_no_parent_fields(result):
     row = listings(result)[(1, 1)]
     assert row["unesco_parent_qid"] is None and row["unesco_parent_label"] is None
+
+
+def test_the_label_check_fails_before_the_main_fetch(client, folders, tmp_path):
+    wrong = {**ENTITIES, WHS: entity({}, label="Something else")}
+    seen: list[dict] = []
+    with respx.mock:
+        mock_all(entities=wrong, seen=seen)
+        with pytest.raises(PipelineError, match="Q9259"):
+            run(client, folders, tmp_path)
+    assert len(seen) == 1
+    assert set(seen[0]["ids"].split("|")) == {WHS, PART_OF}
+
+
+def test_a_destinations_file_from_another_discover_run_is_refused(client, tmp_path):
+    folders = write_inputs(
+        tmp_path / "in",
+        articles=ARTICLES,
+        listings=[],
+        destinations=[
+            {"wikivoyage_page_id": 999, "confirmation": "confirmed", "confirmation_reason": None}
+        ],
+    )
+    with respx.mock:
+        route = respx.get(WIKIDATA).mock(side_effect=fake_wikidata_full({}))
+        with pytest.raises(PipelineError, match="destinations"):
+            run(client, folders, tmp_path)
+        assert not route.called
+
+
+def test_every_fill_through_a_wikipedia_link_is_listed_for_review(result):
+    rows = table(result.output_dir / "wikipedia_link_fills.csv")
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["listing_key"], row["qid"], row["label"]) == (
+        "see:hawa-mahal",
+        "Q103",
+        "Hawa Mahal",
+    )
+    assert (row["wikipedia"], row["coord_lat"], row["coord_long"]) == (
+        "Hawa_Mahal",
+        "26.92",
+        "75.83",
+    )
+
+
+def test_a_hostile_fee_amount_is_escaped_in_the_review_csv(client, folders, tmp_path):
+    hostile = {
+        **ENTITIES,
+        "Q100": entity(
+            in_india(
+                point(26.99, 75.85),
+                ("P2555", [quantity_claim("=1+1", RUPEE)]),
+            ),
+            label="Amer Fort",
+        ),
+    }
+    with respx.mock:
+        mock_all(entities=hostile)
+        done = run(client, folders, tmp_path)
+    samples = table(done.output_dir / "p2555_samples.csv")
+    assert samples[0]["amount"] == "'=1+1"
+
+
+def test_the_report_labels_its_percentage_column(result):
+    text = (result.output_dir / "report.md").read_text(encoding="utf-8")
+    assert "| Share filled |" in text

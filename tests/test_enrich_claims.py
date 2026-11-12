@@ -38,6 +38,7 @@ def test_single_earth_coordinate():
     facts = parse({"P625": [coordinate_claim(26.98, 75.85)]})
     assert facts.coordinate_status == "ok"
     assert (facts.coordinate.lat, facts.coordinate.lon) == (26.98, 75.85)
+    assert facts.coordinate.precision == 1e-05
 
 
 def test_two_live_coordinates_are_multiple_and_unused():
@@ -167,3 +168,24 @@ def test_other_designations_never_give_a_parent():
     other = part_of_whs_claim("Q10")
     other["mainsnak"]["datavalue"]["value"]["id"] = "Q17047640"
     assert parse({"P1435": [other]}).whs_parents == ()
+
+
+def test_a_missing_or_odd_precision_is_none():
+    claim = coordinate_claim(1.0, 2.0)
+    for odd in (None, "x", -1, float("inf")):
+        claim["mainsnak"]["datavalue"]["value"]["precision"] = odd
+        assert parse({"P625": [claim]}).coordinate.precision is None
+
+
+def test_only_well_formed_currency_codes_are_kept():
+    facts = parse(
+        {
+            "P498": [
+                string_claim("INR"),
+                string_claim("=cmd|x"),
+                string_claim("in"),
+                string_claim("EURO"),
+            ]
+        }
+    )
+    assert facts.currency_codes == ("INR",)

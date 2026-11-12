@@ -13,6 +13,7 @@ ENRICH_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "
 class EnrichRules:
     version: int
     disagreement_km: float
+    max_precision_degrees: float
     reasons: dict[str, str] = field(default_factory=dict)
 
 
@@ -32,4 +33,16 @@ def load_enrich_rules(path: Path = ENRICH_RULES_PATH) -> EnrichRules:
         raise PipelineError(f"{path.name}: coordinates.disagreement needs a positive km")
     if not isinstance(reason, str) or not reason.strip():
         raise PipelineError(f"{path.name}: coordinates.disagreement needs a written reason")
-    return EnrichRules(version, float(km), {"disagreement_km": reason.strip()})
+    precision = coordinates.get("max_precision") if isinstance(coordinates, dict) else None
+    degrees = precision.get("degrees") if isinstance(precision, dict) else None
+    why = precision.get("reason") if isinstance(precision, dict) else None
+    if isinstance(degrees, bool) or not isinstance(degrees, int | float) or not 0 < degrees < 1:
+        raise PipelineError(f"{path.name}: coordinates.max_precision needs degrees between 0 and 1")
+    if not isinstance(why, str) or not why.strip():
+        raise PipelineError(f"{path.name}: coordinates.max_precision needs a written reason")
+    return EnrichRules(
+        version,
+        float(km),
+        float(degrees),
+        {"disagreement_km": reason.strip(), "max_precision_degrees": why.strip()},
+    )

@@ -30,6 +30,7 @@ def decide(**kw):
         needs_reference=True,
         is_destination_item=False,
         disagreement_km=25.0,
+        max_precision=0.02,
     )
     return decide_coordinate(**{**defaults, **kw})
 
@@ -82,9 +83,9 @@ def test_a_destination_needs_no_reference_point_and_gets_no_such_flag():
     assert result.filled and result.flags == ()
 
 
-def test_a_page_type_without_a_limit_is_not_distance_checked():
+def test_a_page_type_without_a_limit_is_filled_but_says_it_was_not_distance_checked():
     result = decide(limit_km=None, own_point=None, reference_point=(10.0, 10.0))
-    assert result.filled and result.flags == ()
+    assert result.filled and result.flags == ("no_far_limit",)
 
 
 # --- refusals: the coordinate stays empty, the Wikidata value is kept -----------------------------
@@ -211,5 +212,60 @@ def test_a_rules_file_with_a_bad_version_or_km_is_refused(tmp_path):
     with pytest.raises(PipelineError):
         load_enrich_rules(path)
     path.write_text("not toml [", encoding="utf-8")
+    with pytest.raises(PipelineError):
+        load_enrich_rules(path)
+
+
+# --- precision ----------------------------------------------------------------------------------
+
+
+def with_precision(precision):
+    claim = coordinate_claim(26.99, 75.85)
+    claim["mainsnak"]["datavalue"]["value"]["precision"] = precision
+    return item({"P625": [claim]})
+
+
+def test_a_degree_level_coordinate_is_not_used_and_says_so():
+    result = decide(item=with_precision(1.0))
+    assert not result.filled and result.flags == ("wikidata_coord_coarse",)
+    assert (result.wikidata_lat, result.wikidata_lon) == (26.99, 75.85)
+
+
+def test_precision_exactly_at_the_limit_is_allowed():
+    assert decide(item=with_precision(0.02)).filled
+    assert not decide(item=with_precision(0.0200001)).filled
+
+
+def test_a_fine_or_unknown_precision_is_allowed():
+    assert decide(item=with_precision(1e-05)).filled
+    assert decide(item=with_precision(None)).filled
+
+
+def test_coarse_comes_after_the_country_flags_and_before_far():
+    result = decide(item=with_precision(1.0), country="disagrees", reference_point=(10.0, 10.0))
+    assert result.flags == (
+        "wikidata_country_disagrees",
+        "wikidata_coord_coarse",
+        "wikidata_coord_far",
+    )
+
+
+def test_precision_is_not_checked_when_the_page_has_its_own_point():
+    result = decide(item=with_precision(1.0), own_point=(26.99, 75.85))
+    assert result.flags == ()
+
+
+def test_the_precision_limit_is_in_the_rules_file_with_a_reason():
+    rules = load_enrich_rules(ENRICH_RULES_PATH)
+    assert 0 < rules.max_precision_degrees < 1
+    assert rules.reasons["max_precision_degrees"].strip()
+
+
+def test_a_rules_file_without_a_precision_rule_is_refused(tmp_path):
+    path = tmp_path / "rules.toml"
+    path.write_text(
+        'rules_version = 2\n[coordinates.disagreement]\nkm = 10\nreason = "x"\n',
+        encoding="utf-8",
+    )
     with pytest.raises(PipelineError):
         load_enrich_rules(path)

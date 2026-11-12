@@ -308,3 +308,12 @@ def test_a_date_in_the_future_is_not_within_two_years_of_the_past():
     )
     summary = fee_summary(fee_item(claim), inr_units(), DATA_DATE)
     assert summary.dated and not summary.within_two_years
+
+
+def test_a_year_only_wikidata_date_counts_as_not_dated():
+    # Wikidata writes "+2013-00-00T00:00:00Z" for "2013"; it is not a day, so it is not a date.
+    claim = quantity_claim(
+        "+50", "Q80", qualifiers={"P585": time_qualifier("+2013-00-00T00:00:00Z")}
+    )
+    summary = fee_summary(fee_item(claim), inr_units(), DATA_DATE)
+    assert summary.has_fee and not summary.dated and not summary.within_two_years

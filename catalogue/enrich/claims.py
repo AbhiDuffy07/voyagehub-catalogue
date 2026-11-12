@@ -35,12 +35,14 @@ PART_OF_WORLD_HERITAGE_SITE = "Q43113623"  # "part of UNESCO World Heritage Site
 EARTH = "http://www.wikidata.org/entity/Q2"
 _ENTITY_URL = "http://www.wikidata.org/entity/"
 _DATE = re.compile(r"[+-](\d{4,})-(\d{2})-(\d{2})T")
+_CURRENCY_CODE = re.compile(r"[A-Z]{3}")
 
 
 @dataclass(frozen=True, slots=True)
 class Coordinate:
     lat: float
     lon: float
+    precision: float | None = None  # degrees; how exactly Wikidata says the point is known
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +157,9 @@ def _coordinate(claims: Mapping[str, Any]) -> tuple[str, Coordinate | None]:
         return "invalid", None
     if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat, lon) == (0, 0):
         return "invalid", None
-    return "ok", Coordinate(float(lat), float(lon))
+    precision = value.get("precision")
+    exact = isinstance(precision, int | float) and math.isfinite(precision) and precision > 0
+    return "ok", Coordinate(float(lat), float(lon), float(precision) if exact else None)
 
 
 def _fees(claims: Mapping[str, Any]) -> tuple[Fee, ...]:
@@ -203,7 +207,9 @@ def parse_item(qid: str, entity: Mapping[str, Any]) -> ItemFacts:
         whs_parents=_whs_parents(claims),
         time_zones=_items(claims, TIME_ZONE),
         iana_zones=_strings(claims, IANA_ZONE),
-        currency_codes=_strings(claims, CURRENCY_CODE),
+        currency_codes=tuple(
+            c for c in _strings(claims, CURRENCY_CODE) if _CURRENCY_CODE.fullmatch(c)
+        ),
         image=images[0] if len(images) == 1 else None,
         whc_ids=_strings(claims, WHC_ID),
         coordinate_status=status,

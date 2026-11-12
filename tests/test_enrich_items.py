@@ -1,6 +1,9 @@
+import httpx
+import pytest
 import respx
 
 from catalogue.enrich.items import fetch_items
+from catalogue.errors import PipelineError
 from tests.apifakes import coordinate_claim, entity, fake_wikidata_full
 
 WIKIDATA = "https://www.wikidata.org/w/api.php"
@@ -75,3 +78,20 @@ def test_no_ids_means_no_requests(client):
     route = respx.get(WIKIDATA).mock(side_effect=fake_wikidata_full({}))
     result = fetch_items(client, [])
     assert not route.called and result.items == {}
+
+
+@respx.mock
+def test_a_reply_that_leaves_out_a_requested_item_is_an_error_not_a_flag(client):
+    def short(request):
+        return httpx.Response(200, json={"entities": {"Q1": {"id": "Q1", "claims": {}}}})
+
+    respx.get(WIKIDATA).mock(side_effect=short)
+    with pytest.raises(PipelineError, match="every requested"):
+        fetch_items(client, ["Q1", "Q2"])
+
+
+@respx.mock
+def test_a_reply_without_entities_is_an_error(client):
+    respx.get(WIKIDATA).mock(return_value=httpx.Response(200, json={"success": 1}))
+    with pytest.raises(PipelineError, match="every requested"):
+        fetch_items(client, ["Q1"])

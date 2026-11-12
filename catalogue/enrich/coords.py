@@ -9,10 +9,12 @@ Blocking flags, always reported in this order when several apply:
   item_is_destination      the item is a destination's own item (the city, not a place in it)
   country_unconfirmed      Wikidata gives no country, or we have none to compare with
   wikidata_country_disagrees   Wikidata's country is not the page's country
+  wikidata_coord_coarse    Wikidata says the point is known only to within a degree or so
   wikidata_coord_far       further from the page's own point than that page type allows
 Item-level reasons (no coordinate to use): no_wikidata_id, bad_wikidata_id, item_missing,
 item_merged, no_p625, multiple_coordinates, not_earth, invalid_wikidata_coordinate.
-Informational (do not block): own_geo_invalid, no_page_point, wikidata_coord_disagrees.
+Informational (do not block): own_geo_invalid, no_page_point, no_far_limit (the page type has no
+distance limit, so the fill was not distance-checked), wikidata_coord_disagrees.
 """
 
 from collections.abc import Collection
@@ -61,6 +63,7 @@ def decide_coordinate(
     needs_reference: bool,
     is_destination_item: bool,
     disagreement_km: float,
+    max_precision: float,
 ) -> CoordDecision:
     """`own_point`: the page's or listing's usable Wikivoyage point. `own_invalid`: it has a value
     that is not usable. `reference_point` and `limit_km`: the owning page's point and the far
@@ -101,12 +104,16 @@ def decide_coordinate(
         blocking.append("country_unconfirmed")
     elif country == "disagrees":
         blocking.append("wikidata_country_disagrees")
+    if wikidata.precision is not None and wikidata.precision > max_precision:
+        blocking.append("wikidata_coord_coarse")
     note: list[str] = []
     if reference_point is not None and limit_km is not None:
         if distance_km(reference_point, (wikidata.lat, wikidata.lon)) > limit_km:
             blocking.append("wikidata_coord_far")
-    elif reference_point is None and needs_reference:
-        note.append("no_page_point")
+    elif needs_reference:
+        # Either the page has no point, or its type has no distance limit (a region, say). The fill
+        # still needs the country to match, but it was not distance-checked, and the row says so.
+        note.append("no_page_point" if reference_point is None else "no_far_limit")
 
     if blocking:
         return result((*informational, *blocking))

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from catalogue.enrich.api import api_get
 from catalogue.enrich.claims import ItemFacts, parse_item
+from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
@@ -54,7 +55,11 @@ def fetch_items(client: PoliteClient, qids: Iterable[str]) -> ItemsResult:
                 "sitefilter": "enwiki",
             },
         )
-        for requested, entity in reply.get("entities", {}).items():
+        entities = reply.get("entities")
+        if not isinstance(entities, dict) or not set(batch) <= set(entities):
+            # A truncated reply must not turn into quiet `item_missing` flags on the lost items.
+            raise PipelineError("Wikidata's reply did not include every requested item")
+        for requested, entity in entities.items():
             if "missing" in entity:
                 missing.add(requested)
                 continue

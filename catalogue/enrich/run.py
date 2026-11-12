@@ -80,6 +80,9 @@ class Tally:
     coords: dict[tuple[str, str], CoordCount] = field(default_factory=dict)
     link_status: Counter = field(default_factory=Counter)
     link_rows: list[tuple[int, int, str, str, str, str]] = field(default_factory=list)
+    link_fills: list[tuple[int, int, str, str, str, str, str, Any, Any]] = field(
+        default_factory=list
+    )
     heritage: dict[tuple[str, str], set[str]] = field(default_factory=lambda: defaultdict(set))
     unmapped: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
     fee_items: dict[tuple[str, str], ItemFacts] = field(default_factory=dict)
@@ -232,12 +235,15 @@ def run_enrich_wikidata(
     verify_inputs(discover_folder, listings_folder, country_filter=country_filter)
     # fetch-listings filters by country but discover's files are always the whole world, so an
     # India run must not look up (or write facts for) any other country's articles.
+    every_article = read_articles(discover_folder)
     articles = [
-        a
-        for a in read_articles(discover_folder)
-        if country_filter is None or a.tree_country_iso == country_filter
+        a for a in every_article if country_filter is None or a.tree_country_iso == country_filter
     ]
     states = read_destination_states(discover_folder)
+    if not set(states) <= {a.page_id for a in every_article}:
+        # destinations.jsonl is not covered by a manifest hash; a stale one would change the
+        # confirmation of destinations silently.
+        raise PipelineError("destinations.jsonl does not match articles.jsonl; run discover again")
     page_geo = read_page_geo(listings_folder)
     listings = list(iter_listings(listings_folder))
 
@@ -245,6 +251,11 @@ def run_enrich_wikidata(
     for iso in detail_countries:
         if iso.upper() not in known_countries:
             raise PipelineError(f"unknown country code {iso.upper()} for --detail; check the code")
+
+    # The two designation labels the UNESCO rules rest on are checked first, so a changed label
+    # stops the run in seconds instead of after hours of fetching.
+    guard = fetch_items(client, set(EXPECTED_LABELS))
+    _check_world_heritage_label(guard.items)
 
     # --- Wikidata IDs ------------------------------------------------------------------------
     article_qid: dict[int, tuple[str, str]] = {}  # page id -> (qid, source)
@@ -279,8 +290,7 @@ def run_enrich_wikidata(
     wanted = {q for q, _ in article_qid.values()} | {q for q, _, _ in listing_ids if q}
     first = fetch_items(client, wanted)
     second = fetch_items(client, _references(first.items))
-    items = {**second.items, **first.items}
-    _check_world_heritage_label(items)
+    items = {**guard.items, **second.items, **first.items}
 
     def resolve(qid: str, result: ItemsResult = first) -> tuple[ItemFacts | None, str | None]:
         if qid in result.redirects:
@@ -356,11 +366,26 @@ def run_enrich_wikidata(
                 needs_reference=True,
                 is_destination_item=qid in destination_qids,
                 disagreement_km=rules.disagreement_km,
+                max_precision=rules.max_precision_degrees,
             )
             if decision.filled:
                 counts.filled += 1
                 counts.filled_via_link += source == "wikipedia_link"
             fields, extra = _item_fields(item, kind_map, tally, x.country_iso, items)
+            if decision.filled and source == "wikipedia_link" and item is not None:
+                tally.link_fills.append(
+                    (
+                        x.page_id,
+                        x.ordinal,
+                        x.listing_key,
+                        x.wikipedia,
+                        item.qid,
+                        item.label or "",
+                        fields["kind"] or "",
+                        decision.lat,
+                        decision.lon,
+                    )
+                )
             flags = sorted({*decision.flags, *extra})
             counts.flags.update(flags)
             if item is not None and x.kind in FEE_KINDS:
@@ -467,6 +492,7 @@ def _article_row(
             needs_reference=False,
             is_destination_item=False,
             disagreement_km=rules.disagreement_km,
+            max_precision=rules.max_precision_degrees,
         )
         flags += decision.flags
         counts.filled += decision.filled

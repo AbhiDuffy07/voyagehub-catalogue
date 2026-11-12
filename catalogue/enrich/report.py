@@ -68,7 +68,7 @@ def _fee_rows(tally: "Tally", fees: Mapping[tuple[str, str], FeeSummary]) -> lis
             rows.append(
                 [
                     country,
-                    code,
+                    _safe_cell(code),
                     "",
                     len(sub),
                     sum(f.dated for f in sub),
@@ -89,9 +89,9 @@ def _fee_samples(tally: "Tally", items: Mapping[str, ItemFacts]) -> list[list[An
                     country,
                     qid,
                     _safe_cell(item.label or ""),
-                    fee.amount,
-                    fee.unit_qid or "",
-                    ";".join(unit.currency_codes) if unit else "",
+                    _safe_cell(fee.amount),
+                    _safe_cell(fee.unit_qid or ""),
+                    _safe_cell(";".join(unit.currency_codes) if unit else ""),
                     fee.point_in_time or "",
                     fee.start or "",
                     fee.end or "",
@@ -169,7 +169,7 @@ def summary_text(totals: Mapping[str, Any]) -> str:
 
 def _coordinate_table(tally: "Tally", countries: Sequence[str] | None = None) -> list[str]:
     lines = [
-        "| Subject | Missing before | Filled | Still missing | Filled |",
+        "| Subject | Missing before | Filled | Still missing | Share filled |",
         "|---|---:|---:|---:|---:|",
     ]
     for subject in ("listings", "destinations"):
@@ -207,14 +207,19 @@ def render_report(
     ]
     lines += [f"### Top {TOP_COUNTRIES} countries by coordinates filled", ""]
     for country in by_country:
-        shown = f"{names.get(country, country)} ({country})"
+        name = names.get(country, country)
+        shown = f"{name} ({country})" if name != country else country
         lines.append(f"**{shown}**")
         lines += [""] + _coordinate_table(tally, [country]) + [""]
     lines += ["## Flags", "", "Listings:", ""] + _flag_lines(totals["listings"]["flags"])
     lines += ["", "Destinations:", ""] + _flag_lines(totals["destinations"]["flags"])
     lines += ["", "## Wikipedia links", ""] + _flag_lines(totals["wikipedia_links"])
     lines += ["", "## Items", ""] + _flag_lines(totals["items"])
-    lines += ["", "## UNESCO", ""] + _flag_lines(totals["unesco"])
+    lines += [
+        "",
+        "## UNESCO (listing and article rows, so one item can count more than once)",
+        "",
+    ] + _flag_lines(totals["unesco"])
     lines += ["", "## Time zones (by basis)", ""] + _flag_lines(totals["timezone_basis"])
     lines += ["", "## Entry fees (P2555), counted only", ""] + _flag_lines(totals["p2555"])
     lines += ["", "No fee value is used anywhere; `p2555_samples.csv` is for review.", ""]
@@ -335,6 +340,39 @@ def write_all(
         [country, designation, _safe_cell(_label(items, designation)), len(ids)]
         for (country, designation), ids in sorted(tally.heritage.items())
     ]
+    link_fill_rows = [
+        [
+            page_id,
+            ordinal,
+            _safe_cell(key),
+            _safe_cell(value),
+            qid,
+            _safe_cell(label),
+            kind,
+            lat,
+            lon,
+        ]
+        for page_id, ordinal, key, value, qid, label, kind, lat, lon in sorted(
+            tally.link_fills, key=lambda row: row[:2]
+        )
+    ]
+    write_text(
+        target / "wikipedia_link_fills.csv",
+        _csv_text(
+            [
+                "page_id",
+                "ordinal",
+                "listing_key",
+                "wikipedia",
+                "qid",
+                "label",
+                "kind",
+                "coord_lat",
+                "coord_long",
+            ],
+            link_fill_rows,
+        ),
+    )
     write_text(
         target / "heritage_designations.csv",
         _csv_text(["country_iso", "designation_qid", "label", "items"], heritage_rows),

@@ -5,7 +5,7 @@
 # Change a number only together with its reason, and bump rules_version. Nothing in the code is
 # country-specific.
 
-rules_version = 1
+rules_version = 2
 
 [coordinates.disagreement]
 km = 25
@@ -17,3 +17,12 @@ have both points, the median distance is 0 km, p95 0.6 km, p99 15.7 km, and 29 (
 above 25 km. Of 1,081 destinations, median 0.14 km, p95 13.5 km, p99 49.4 km, and 38 (3.5%) \
 are above 25 km (a town's centre point is looser than a building's). PROVISIONAL until the \
 world run's table confirms 25 km is not too tight for large countries."""
+
+[coordinates.max_precision]
+degrees = 0.02
+reason = """Wikidata stores how exactly a point is known (`precision`, in degrees). Up to an \
+arcminute (0.0167 degrees, about 1.9 km) is treated as a place's point; anything coarser \
+(0.1 or 1 degree, 11 to 111 km) describes an area, not a place, so it is never used to fill a \
+missing coordinate and the row says `wikidata_coord_coarse`. Inclusive: exactly 0.02 is allowed. \
+A point with no stated precision is allowed. Set from Wikidata's own precision scale, not yet \
+from the data: the India and world runs' flag counts are the check."""
