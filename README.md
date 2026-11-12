@@ -84,6 +84,10 @@ Small items found in review of `fetch-listings`, not yet done:
 - **Names with a template:** about 2.6% of India's names are `{{station|...}}` templates; they are flagged `name_markup` and left raw.
 - **Coordinates in degrees-minutes-seconds** (`17°21'18"N`) are flagged `coord_invalid`, not converted.
 
+## Progress lines
+
+Long jobs (`discover`, `fetch-listings`, `enrich-wikidata`) print a count-only line at most every 30 seconds and a final `done` line, such as `progress: Wikidata items 12500 of 111984 (11%)`, so a long run can be told from a hung one. A line holds only a fixed label and whole numbers, never a title, row text, address or the User-Agent, and goes to standard output next to the job's summary (standard error stays for errors). The helper is `catalogue/progress.py`.
+
 ## Politeness towards Wikimedia
 
 Every request carries a descriptive User-Agent with a contact address, at most 3 requests run at once, at most 200 a minute, and `Retry-After` is respected. See Wikimedia's [User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy).

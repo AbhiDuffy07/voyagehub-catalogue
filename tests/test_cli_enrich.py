@@ -120,3 +120,13 @@ def test_a_bad_dump_date_is_one_clear_error(folders, capsys):
     code = main(argv, environ={"CONTACT_EMAIL": EMAIL}, env_file=None, client_factory=quick_client)
     assert code == 1
     assert "YYYYMMDD" in capsys.readouterr().err
+
+
+def test_progress_lines_show_counts_and_no_row_text(folders, api, capsys):
+    code, out = enrich(folders, capsys)
+    assert code == 0
+    progress = [line for line in out.out.splitlines() if line.startswith("progress:")]
+    assert any(line.startswith("progress: Wikidata items") for line in progress)
+    assert "progress: listings 1 of 1 (100%) done" in progress
+    assert not any("Amber" in line or EMAIL in line for line in progress)
+    assert out.err == ""
