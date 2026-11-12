@@ -117,6 +117,52 @@ def item_claim_with_end(qid, end="+2001-01-01T00:00:00Z"):
     return statement
 
 
+def fake_wikipedia(pages, redirects=None, seen=None):
+    """Answer an enwiki pageprops query.
+
+    `pages` maps a canonical title to {"qid": ..., "disambiguation": bool}; a title not listed is
+    missing. `redirects` maps a title to the canonical title it redirects to. Like the real API it
+    normalises underscores and the first letter, reports `normalized` and `redirects` pairs, and
+    returns pages in a different order from the request.
+    """
+    redirects = redirects or {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        titles = request.url.params["titles"].split("|")
+        if seen is not None:
+            seen.append(titles)
+        normalized, redirected, found = [], [], []
+        for raw in titles:
+            title = raw.replace("_", " ")
+            title = title[:1].upper() + title[1:]
+            if title != raw:
+                normalized.append({"from": raw, "to": title})
+            if title in redirects and request.url.params.get("redirects"):
+                redirected.append({"from": title, "to": redirects[title]})
+                title = redirects[title]
+            if title in pages:
+                props = {}
+                if pages[title].get("qid"):
+                    props["wikibase_item"] = pages[title]["qid"]
+                if pages[title].get("disambiguation"):
+                    props["disambiguation"] = ""
+                page = {"pageid": 1, "ns": 0, "title": title}
+                if props:
+                    page["pageprops"] = props
+            else:
+                page = {"ns": 0, "title": title, "missing": True}
+            if page not in found:
+                found.append(page)
+        query = {"pages": found[::-1]}
+        if normalized:
+            query["normalized"] = normalized
+        if redirected:
+            query["redirects"] = redirected
+        return httpx.Response(200, json={"batchcomplete": True, "query": query})
+
+    return answer
+
+
 def entity(claims, *, revid=1, label=None, description=None, enwiki=None):
     """A full wbgetentities entity body for the B4 parser."""
     body = {"type": "item", "id": "Q0", "lastrevid": revid, "claims": claims}
