@@ -45,6 +45,13 @@ SCHEMA_VERSION = 1
 LISTING_KINDS = frozenset({"see", "do"})
 NO_COUNTRY = "(none)"
 INPUT_FILES = ("destination_facts.jsonl", "listing_facts.jsonl")
+OUTPUT_FILES = (
+    "flags_by_country.csv",
+    "redirected_candidates.csv",
+    "report.md",
+    "summaries.jsonl",
+    "summaries_by_country.csv",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +76,7 @@ class SummaryResult:
         lines = [
             f"summary rows: {totals['rows']} (articles {totals['articles']}, "
             f"listings {totals['listings']}); distinct Wikipedia titles: {totals['titles']}",
-            f"with text: {totals['with_text']}; flags: {flagged}",
+            f"with text: {totals['with_text']}; flag occurrences: {flagged}",
         ]
         if totals["flags"]:
             lines.append(", ".join(f"{k} {v}" for k, v in totals["flags"].items()))
@@ -85,10 +92,14 @@ def _verify(folder: Path, country_filter: str | None) -> tuple[str, dict[str, st
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         recorded_country = manifest["country_filter"]
         recorded = manifest["outputs_sha256"]
-    except (ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError):
         raise PipelineError(
             "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
         ) from None
+    if not isinstance(recorded, dict):
+        raise PipelineError(
+            "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
+        )
     if recorded_country != country_filter:
         raise PipelineError(
             "enrich-wikidata was run for a different country filter; use the same --country"
@@ -98,7 +109,10 @@ def _verify(folder: Path, country_filter: str | None) -> tuple[str, dict[str, st
         path = folder / name
         if not path.is_file():
             raise PipelineError(f"{name} not found in {folder}")
-        hashes[name] = _sha256(path)
+        try:
+            hashes[name] = _sha256(path)
+        except OSError:
+            raise PipelineError(f"{name} could not be read") from None
         if hashes[name] != recorded.get(name):
             raise PipelineError(f"{name} does not match the enrich-wikidata manifest")
     return hashlib.sha256(manifest_path.read_bytes()).hexdigest(), hashes
@@ -160,11 +174,15 @@ def _row(
     elif not page.extract:
         flags.append("empty_extract")
     elif not page.redirected:
-        lead = page.extract
-        if len(lead) < rules.very_short_chars:
-            flags.append("very_short")
-        if has_extract_gap(lead):
-            flags.append("extract_gap")
+        if page.revision_id is None:
+            # Every row with text must carry a permalink to the revision it came from.
+            flags.append("no_revision")
+        else:
+            lead = page.extract
+            if len(lead) < rules.very_short_chars:
+                flags.append("very_short")
+            if has_extract_gap(lead):
+                flags.append("extract_gap")
     if page.redirected:
         # Owner ruling 2026-11-12: a page reached through a redirect often describes something
         # broader or different (a lake's summary is its town's), so its text is held back. The
@@ -190,7 +208,7 @@ def _row(
         "summary": first_paragraph(lead) if lead else None,
         "licence": LICENCE,
         "licence_url": LICENCE_URL,
-        "attribution": attribution(title) if title else None,
+        "attribution": attribution(title) if title and lead is not None else None,
         "dump_date": f"{dump_date[:4]}-{dump_date[4:6]}-{dump_date[6:]}",
         "read_at": read_at,
         "flags": sorted(flags),
@@ -280,7 +298,7 @@ def run_wikipedia_summary(
                         subject.page_id,
                         subject.ordinal,
                         _safe_cell(subject.listing_key or ""),
-                        subject.country_iso or "",
+                        _safe_cell(subject.country_iso or ""),
                         _safe_cell(subject.title),
                         _safe_cell(page.title or ""),
                         row["url"],
@@ -304,7 +322,7 @@ def run_wikipedia_summary(
         _csv_text(
             ["country_iso", "subject", "rows", "with_text", "flagged"],
             [
-                [c, s, t["rows"], t["with_text"], t["flagged"]]
+                [_safe_cell(c), s, t["rows"], t["with_text"], t["flagged"]]
                 for (c, s), t in sorted(counts.items())
             ],
         ),
@@ -330,7 +348,7 @@ def run_wikipedia_summary(
         target / "flags_by_country.csv",
         _csv_text(
             ["country_iso", "subject", "flag", "count"],
-            [[c, s, f, n] for (c, s, f), n in sorted(by_country_flag.items())],
+            [[_safe_cell(c), s, f, n] for (c, s, f), n in sorted(by_country_flag.items())],
         ),
     )
     totals = {
@@ -355,9 +373,8 @@ def run_wikipedia_summary(
             "inputs_sha256": input_hashes,
             "totals": totals,
             "outputs_sha256": {
-                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in sorted(target.iterdir())
-                if path.is_file() and path.name != "manifest.json"
+                name: hashlib.sha256((target / name).read_bytes()).hexdigest()
+                for name in OUTPUT_FILES  # only what this run wrote, not stale files
             },
         },
     )

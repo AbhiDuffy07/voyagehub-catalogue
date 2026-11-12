@@ -263,6 +263,84 @@ def test_the_number_of_workers_must_be_positive(client):
         fetch_summaries(client, ["Jaipur"], workers=0)
 
 
+@respx.mock
+def test_a_page_with_an_extract_but_no_revision_has_no_revision_id(client):
+    respx.get(ENWIKI).mock(
+        side_effect=fake_wikipedia_summaries({"Odd": {"extract": "Text.", "revid": None}})
+    )
+    got = fetch_summaries(client, ["Odd"])["Odd"]
+    assert got.status == "ok" and got.extract == "Text." and got.revision_id is None
+
+
+@respx.mock
+def test_a_chain_of_redirects_is_followed(client):
+    respx.get(ENWIKI).mock(
+        side_effect=fake_wikipedia_summaries(
+            {"Amer Fort": page()}, redirects={"First": "Second", "Second": "Amer Fort"}
+        )
+    )
+    got = fetch_summaries(client, ["First"])["First"]
+    assert got.status == "ok" and got.title == "Amer Fort" and got.redirected
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"query": {"pages": "oops"}},
+        {"query": {"pages": [{"title": "A"}], "redirects": [{"nope": 1}]}},
+        {"query": {"pages": [{"title": "A"}], "normalized": ["x"]}},
+        {"query": []},
+    ],
+)
+@respx.mock
+def test_an_unexpected_reply_shape_is_a_safe_error_not_a_traceback(client, reply):
+    respx.get(ENWIKI).mock(return_value=httpx.Response(200, json=reply))
+    with pytest.raises(PipelineError) as raised:
+        fetch_summaries(client, ["A"])
+    assert "unexpected" in str(raised.value)
+
+
+@respx.mock
+def test_titles_that_cannot_be_asked_for_are_no_answer_without_a_request(client):
+    seen = []
+    respx.get(ENWIKI).mock(side_effect=fake_wikipedia_summaries({"Jaipur": page()}, seen=seen))
+    got = fetch_summaries(client, ["Jaipur", "A|B", "Line\nBreak", ""])
+    assert got["Jaipur"].status == "ok"
+    assert {got[t].status for t in ("A|B", "Line\nBreak", "")} == {"no_answer"}
+    asked = [t for p in seen for t in p["titles"].split("|")]
+    assert asked == ["Jaipur"]
+
+
+@respx.mock
+def test_results_do_not_depend_on_which_batch_finishes_first(client):
+    inner = fake_wikipedia_summaries(many_pages())
+
+    def first_batch_is_slow(request):
+        if "Place 00" in request.url.params["titles"].split("|"):
+            time.sleep(0.3)
+        return inner(request)
+
+    titles = [f"Place {n:02d}" for n in range(60)]
+    respx.get(ENWIKI).mock(side_effect=first_batch_is_slow)
+    slow_first = fetch_summaries(client, titles, workers=3)
+    respx.get(ENWIKI).mock(side_effect=inner)
+    assert slow_first == fetch_summaries(client, titles, workers=1)
+
+
+@respx.mock
+def test_a_failure_inside_a_continuation_stops_the_run_with_a_safe_error(client):
+    inner = fake_wikipedia_summaries(many_pages(4), split=2)
+
+    def second_reply_fails(request):
+        if "excontinue" in request.url.params:
+            return httpx.Response(400)
+        return inner(request)
+
+    respx.get(ENWIKI).mock(side_effect=second_reply_fails)
+    with pytest.raises(PipelineError):
+        fetch_summaries(client, [f"Place {n:02d}" for n in range(4)])
+
+
 # --- the rules file -----------------------------------------------------------------------------
 
 

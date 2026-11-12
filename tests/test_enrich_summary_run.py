@@ -321,3 +321,91 @@ def test_a_gap_from_removed_pronunciation_markup_is_flagged_and_the_text_is_not_
     row = jsonl(done.output_dir / "summaries.jsonl")[0]
     assert row["flags"] == ["extract_gap"]
     assert row["lead_text"] == text
+
+
+def _run_with(client, tmp_path, listings, pages, redirects=None):
+    folder = write_enrich_output(
+        tmp_path / "enrich" / "20261101-IN", destinations=[], listings=listings
+    )
+    with respx.mock:
+        respx.get(ENWIKI).mock(
+            side_effect=fake_wikipedia_summaries(pages, redirects=redirects or {})
+        )
+        return run(client, folder, tmp_path)
+
+
+def test_a_redirect_to_a_missing_page_or_disambiguation_or_empty_lead_has_both_flags(
+    client, tmp_path
+):
+    listings = [
+        listing_fact(1, 1, "see:a", enwiki="To Missing"),
+        listing_fact(1, 2, "see:b", enwiki="To Mercury"),
+        listing_fact(1, 3, "see:c", enwiki="To Blank"),
+        listing_fact(1, 4, "see:d", enwiki="Hop One"),
+    ]
+    done = _run_with(
+        client,
+        tmp_path,
+        listings,
+        PAGES,
+        {
+            "To Missing": "Nowhere Target",
+            "To Mercury": "Mercury",
+            "To Blank": "Blank",
+            "Hop One": "Hop Two",
+            "Hop Two": "Amer Fort",
+        },
+    )
+    got = {r["ordinal"]: r for r in jsonl(done.output_dir / "summaries.jsonl")}
+    assert got[1]["flags"] == ["missing_page", "redirected"]
+    assert got[2]["flags"] == ["disambiguation", "redirected"]
+    assert got[3]["flags"] == ["empty_extract", "redirected"]
+    assert got[4]["flags"] == ["redirected"] and got[4]["wikipedia_title"] == "Amer Fort"
+    assert all(r["lead_text"] is None and r["summary"] is None for r in got.values())
+    # only a redirect that had text to hold back is listed for review
+    listed = table(done.output_dir / "redirected_candidates.csv")
+    assert [r["ordinal"] for r in listed] == ["4"]
+
+
+def test_hostile_text_in_the_review_file_cannot_start_a_spreadsheet_formula(client, tmp_path):
+    pages = {
+        "Target": wiki("=cmd|x is a string that a spreadsheet would run if it were not escaped."),
+    }
+    done = _run_with(
+        client,
+        tmp_path,
+        [listing_fact(1, 1, "=evil-key", enwiki="=1+1")],
+        pages,
+        {"=1+1": "Target"},
+    )
+    row = table(done.output_dir / "redirected_candidates.csv")[0]
+    assert row["listing_key"] == "'=evil-key" and row["requested_title"] == "'=1+1"
+    assert row["excerpt"].startswith("'=cmd")
+
+
+def test_a_page_with_text_but_no_revision_is_flagged_and_its_text_held_back(client, tmp_path):
+    pages = {
+        "Odd": {"extract": "Odd is a place with a lead long enough for the limit.", "revid": None}
+    }
+    done = _run_with(client, tmp_path, [listing_fact(1, 1, "see:odd", enwiki="Odd")], pages)
+    row = jsonl(done.output_dir / "summaries.jsonl")[0]
+    assert row["flags"] == ["no_revision"]
+    assert row["lead_text"] is None and row["permalink"] is None and row["attribution"] is None
+
+
+def test_a_row_without_text_carries_no_excerpt_attribution(result):
+    for key in ((1, 5), (1, 7), (1, 8), (4, 0)):
+        assert rows(result)[key]["attribution"] is None
+    assert rows(result)[(1, 0)]["attribution"] is not None
+
+
+def test_a_manifest_whose_hashes_are_not_a_table_is_a_clear_error(client, enrich_folder, tmp_path):
+    (enrich_folder / "manifest.json").write_text(
+        json.dumps({"country_filter": "IN", "outputs_sha256": ["x"]}), encoding="utf-8"
+    )
+    with pytest.raises(PipelineError, match="manifest"):
+        run(client, enrich_folder, tmp_path)
+
+
+def test_the_summary_line_counts_flag_occurrences_not_rows(result):
+    assert "flag occurrences" in result.summary()

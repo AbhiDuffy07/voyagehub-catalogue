@@ -245,9 +245,11 @@ def fake_wikipedia_summaries(pages, redirects=None, seen=None, split=None, omit=
             title = title[:1].upper() + title[1:]
             if title != raw:
                 normalized.append({"from": raw, "to": title})
-            if title in redirects and params.get("redirects"):
+            hops = 0
+            while title in redirects and params.get("redirects") and hops < 5:
                 redirected.append({"from": title, "to": redirects[title]})
                 title = redirects[title]
+                hops += 1
             if title in omit:
                 continue
             if title in pages:
@@ -255,9 +257,10 @@ def fake_wikipedia_summaries(pages, redirects=None, seen=None, split=None, omit=
                 page = {"pageid": 1, "ns": 0, "title": title}
                 if data.get("extract") is not None:
                     page["extract"] = data["extract"]
-                page["revisions"] = [
-                    {"revid": data["revid"], "parentid": 0, "timestamp": data["timestamp"]}
-                ]
+                if data.get("revid") is not None:
+                    page["revisions"] = [
+                        {"revid": data["revid"], "parentid": 0, "timestamp": data["timestamp"]}
+                    ]
                 if data.get("disambiguation"):
                     page["pageprops"] = {"disambiguation": ""}
             else:

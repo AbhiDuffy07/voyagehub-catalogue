@@ -36,6 +36,7 @@ LICENCE_URL = "https://creativecommons.org/licenses/by-sa/4.0/"
 ATTRIBUTION_TEXT = "Wikipedia contributors"
 # What Wikipedia's extract generator leaves behind when it strips a pronunciation or audio
 # template: "Agra (; Hindi: ...)", "Place ()", "Place (, a village)".
+_BAD_TITLE = re.compile(r"[|\x00-\x1f\x7f]")  # splits the request or is not a title
 _GAP = re.compile(r"\(\s*[;,]|\(\s*\)|[;,]\s*\)")
 SUMMARY_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "summary_rules.toml"
 
@@ -116,14 +117,20 @@ def _read_batch(client: PoliteClient, batch: list[str]) -> dict[str, Any]:
     extra: dict[str, str | int] = {}
     for _ in range(MAX_CONTINUATIONS + 1):
         reply = api_get(client, ENWIKI_API, {**params, **extra})
-        query = reply.get("query", {})
-        for pair in query.get("normalized", []):
-            normalized[pair["from"]] = pair["to"]
-        for pair in query.get("redirects", []):
-            redirects[pair["from"]] = pair["to"]
-        for page in query.get("pages", []):
-            if "title" in page:
-                pages.setdefault(page["title"], {}).update(page)
+        try:
+            query = reply.get("query", {})
+            listed = query.get("pages", [])
+            if not isinstance(listed, list):
+                raise TypeError("pages is not a list")
+            for pair in query.get("normalized", []):
+                normalized[pair["from"]] = pair["to"]
+            for pair in query.get("redirects", []):
+                redirects[pair["from"]] = pair["to"]
+            for page in listed:
+                if "title" in page:
+                    pages.setdefault(page["title"], {}).update(page)
+        except (KeyError, TypeError, AttributeError):
+            raise PipelineError("Wikipedia answered with an unexpected reply shape") from None
         more = reply.get("continue")
         if not more:
             return {"pages": pages, "normalized": normalized, "redirects": redirects}
@@ -159,6 +166,10 @@ def _summary(requested: str, read: dict[str, Any]) -> PageSummary:
     )
 
 
+def _unaskable(title: str) -> bool:
+    return not title.strip() or _BAD_TITLE.search(title) is not None
+
+
 def fetch_summaries(
     client: PoliteClient, titles: Iterable[str], *, workers: int = DEFAULT_WORKERS
 ) -> dict[str, PageSummary]:
@@ -171,10 +182,13 @@ def fetch_summaries(
     """
     if workers < 1:
         raise ValueError("workers must be at least 1")
-    batches = list(_batches(sorted(set(titles))))
+    distinct = set(titles)
+    results: dict[str, PageSummary] = {
+        title: PageSummary("no_answer") for title in distinct if _unaskable(title)
+    }
+    batches = list(_batches(sorted(t for t in distinct if t not in results)))
     pending = iter(batches)
     progress = Progress("Wikipedia titles", sum(len(b) for b in batches))
-    results: dict[str, PageSummary] = {}
     in_flight: dict[Future[dict[str, Any]], list[str]] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
 
