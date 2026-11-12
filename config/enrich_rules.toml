@@ -1,0 +1,15 @@
+# Rules for enrich-wikidata (B4). They decide what is flagged; nothing here fills or changes data
+# by itself. How far a Wikidata point may be from a listing's page is not set here: it reuses the
+# `far_km` limits of config/listing_quality.toml, so the two jobs cannot disagree about "far".
+#
+# Change a number only together with its reason, and bump rules_version. Nothing in the code is
+# country-specific.
+
+rules_version = 1
+
+[coordinates.disagreement]
+km = 25
+reason = """PROVISIONAL, to be set from the India run's real distances. When a place has both a \
+Wikivoyage point and a Wikidata point, they are normally within a few hundred metres; further \
+apart than this they are flagged `wikidata_coord_disagrees` for review. The Wikivoyage point is \
+kept either way. Report-only: it never changes a coordinate."""
