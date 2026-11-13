@@ -12,6 +12,7 @@ is guessed.
 import csv
 import re
 import tomllib
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ class SelectionRules:
     min_long_side: int
     hero_long_side: int
     tier_marks: dict[str, frozenset[str]]
+    category_min_word: int
     size_cap: int
     size_weight: float
     target_ratio: float
@@ -99,6 +101,7 @@ def load_selection_rules(path: Path = SELECT_RULES_PATH) -> SelectionRules:
     if isinstance(version, bool) or not isinstance(version, int):
         raise PipelineError(f"{source} needs an integer rules_version")
     drop, gate = _table(document, "drop", source), _table(document, "gate", source)
+    category = _table(document, "category", source)
     tiers, score = _table(document, "tiers", source), _table(document, "score", source)
     words = _strings(drop, "name_words", source)
     pattern = re.compile(
@@ -112,6 +115,7 @@ def load_selection_rules(path: Path = SELECT_RULES_PATH) -> SelectionRules:
         max_aspect=float(_number(drop, "max_aspect", source)),
         min_long_side=_number(gate, "min_long_side", source, whole=True),
         hero_long_side=_number(gate, "hero_long_side", source, whole=True),
+        category_min_word=_number(category, "min_word_length", source, whole=True),
         tier_marks={
             name: frozenset(_strings(tiers, name, source))
             for name in ("featured", "quality", "valued")
@@ -155,6 +159,14 @@ def load_rejected_files(path: Path = REJECTED_PATH) -> frozenset[str]:
     return frozenset(found)
 
 
+def name_words(text: str, min_length: int = 4) -> set[str]:
+    """Lower-case words of at least `min_length` letters, accents folded (`Bhāratpur` is
+    `bharatpur`). Digits and punctuation separate words."""
+    folded = unicodedata.normalize("NFKD", text).casefold()
+    plain = "".join(c for c in folded if not unicodedata.combining(c))
+    return {w for w in re.findall(r"[^\W\d_]+", plain) if len(w) >= min_length}
+
+
 # --- choosing -----------------------------------------
 
 
@@ -190,6 +202,15 @@ def _dropped(row: dict[str, Any], rules: SelectionRules, rejected: frozenset[str
     return sides is None or sides[0] / sides[1] > rules.max_aspect
 
 
+def _about_the_subject(
+    row: dict[str, Any], rules: SelectionRules, subject_words: frozenset[str]
+) -> bool:
+    if "wikidata_p18" in row["sources"]:
+        return True  # the item's own image
+    stem = str(row["commons_file"]).rsplit(".", 1)[0]
+    return bool(name_words(stem, rules.category_min_word) & subject_words)
+
+
 def _tier(row: dict[str, Any], rules: SelectionRules) -> tuple[int, int]:
     if "wikidata_p18" in row["sources"]:
         return (0, 0 if row.get("p18_rank") == "preferred" else 1)
@@ -200,8 +221,17 @@ def _tier(row: dict[str, Any], rules: SelectionRules) -> tuple[int, int]:
     return (4, 0)
 
 
-def choose(rows: list[dict[str, Any]], rules: SelectionRules, rejected: frozenset[str]) -> Choice:
-    """The main photo among one subject's B5 candidate rows, or why there is none."""
+def choose(
+    rows: list[dict[str, Any]],
+    rules: SelectionRules,
+    rejected: frozenset[str],
+    subject_words: frozenset[str] | None,
+) -> Choice:
+    """The main photo among one subject's B5 candidate rows, or why there is none.
+
+    `subject_words` are the name words of the subject itself (see `name_words`); a candidate
+    that comes only from a Commons category must share one of them. `None` skips that rule (the
+    ranking tests only; the job always passes the subject's words)."""
     if not rows:
         return Choice(None, {"no_candidate"}, 0, False)
     usable = [r for r in rows if r["usable"]]
@@ -210,6 +240,10 @@ def choose(rows: list[dict[str, Any]], rules: SelectionRules, rejected: frozense
     survivors = [r for r in usable if not _dropped(r, rules, rejected)]
     if not survivors:
         return Choice(None, {"only_excluded"}, len(rows), False)
+    if subject_words is not None:
+        survivors = [r for r in survivors if _about_the_subject(r, rules, subject_words)]
+        if not survivors:
+            return Choice(None, {"only_unrelated_category"}, len(rows), False)
 
     def long_side(row: dict[str, Any]) -> int:
         return max(_sides(row) or (0, 0))  # survivors always have valid sizes

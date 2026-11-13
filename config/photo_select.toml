@@ -26,6 +26,15 @@ reason = """Owner ruling 2026-11-13: the long side must be at least 1,024 px; po
 (design section 5; the readiness rule counts them). A candidate below the minimum is never chosen \\
 even when it is the only one: the subject is flagged and the app shows the city photo."""
 
+[category]
+# A candidate that comes ONLY from the item's Commons category (not its own P18 image) must share a
+# word of at least this many letters with the subject's own name (Wikivoyage title, Wikidata label,
+# English Wikipedia title; for a listing its own name, not its city's). B5 searches the category's
+# whole subtree, and on the India run 77 of the 117 photos chosen that way were of something else:
+# butterflies and moths, a Nepal peak and a Greenland iceberg for a Gurgaon destination, a painting,
+# a portrait of a person on a temple. A subject left without one falls back to the city photo.
+min_word_length = 4
+
 [tiers]
 # Order of choice: Wikidata P18 (preferred rank first), then these, then everything else (tier 5,
 # empty until geosearch exists). A P18 file that is also Featured stays in the P18 tier.

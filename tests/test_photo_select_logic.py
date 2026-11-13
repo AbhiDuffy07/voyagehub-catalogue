@@ -3,7 +3,7 @@ import csv
 import pytest
 
 from catalogue.errors import PipelineError
-from catalogue.photos.select import choose, load_rejected_files, load_selection_rules
+from catalogue.photos.select import choose, load_rejected_files, load_selection_rules, name_words
 
 RULES = load_selection_rules()
 FEATURED = "Featured pictures on Wikimedia Commons"
@@ -36,8 +36,10 @@ def cand(
     }
 
 
-def pick(rows, rejected=frozenset()):
-    return choose(rows, RULES, rejected)
+def pick(rows, rejected=frozenset(), words=None):
+    """`words` are the subject's own name words; None skips the category-relatedness rule, which
+    only its own tests exercise."""
+    return choose(rows, RULES, rejected, words)
 
 
 # --- rules and overrides -----------------------------------------
@@ -297,3 +299,56 @@ def test_covered_means_a_candidate_survived_the_drops_before_the_gate():
 
 def test_the_csv_module_is_not_needed():
     assert csv  # keeps the import honest for the override-file tests above
+
+
+# --- category-only candidates must be about the subject ---------------------------------
+
+
+def category_only(name, **kw):
+    return cand(name, sources=("commons_category",), marks=["Quality images"], **kw)
+
+
+def test_name_words_are_letters_of_four_or_more_case_and_accent_folded():
+    assert name_words("Tiger Hill, Darjeeling (Bhāratpur) 12.jpg") == {
+        "tiger",
+        "hill",
+        "darjeeling",
+        "bharatpur",
+    }
+    assert name_words("A of the 7 és") == set()
+
+
+def test_a_category_only_photo_needs_a_word_of_the_subjects_own_name():
+    rosefinch = category_only("Dark-breasted Rosefinch.jpg")
+    choice = pick([rosefinch], words=frozenset({"tiger", "hill", "darjeeling"}))
+    assert choice.chosen is None and choice.flags == {"only_unrelated_category"}
+    assert choice.covered is False
+
+
+def test_a_category_only_photo_that_names_the_place_is_kept():
+    fort = category_only("Amer Fort at dusk.jpg")
+    assert pick([fort], words=frozenset({"amer", "fort"})).chosen is not None
+
+
+def test_a_p18_photo_needs_no_name_match():
+    p18 = cand("Unrelated name.jpg")
+    assert pick([p18], words=frozenset({"nothing"})).chosen["commons_file"] == "Unrelated name.jpg"
+
+
+def test_a_file_that_is_both_p18_and_category_needs_no_name_match():
+    both = cand("Unrelated name.jpg", sources=("commons_category", "wikidata_p18"))
+    assert pick([both], words=frozenset({"nothing"})).chosen is not None
+
+
+def test_an_unrelated_category_photo_never_beats_or_replaces_a_related_one():
+    unrelated = category_only("Iceberg in North Star Bay.jpg", width=6000, height=4000)
+    related = category_only("Gurgaon skyline.jpg", width=1500, height=1000)
+    choice = pick([unrelated, related], words=frozenset({"gurgaon"}))
+    assert choice.chosen["commons_file"] == "Gurgaon skyline.jpg"
+
+
+def test_unrelated_category_photos_do_not_count_as_covered_for_the_gate_numbers():
+    small_unrelated = category_only("Iceberg.jpg", width=800, height=600)
+    assert pick([small_unrelated], words=frozenset({"gurgaon"})).flags == {
+        "only_unrelated_category"
+    }

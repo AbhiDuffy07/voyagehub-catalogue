@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and six jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone` and `photo-candidates`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and seven jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates` and `photo-select`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -115,6 +115,22 @@ Network (Wikidata and Wikimedia Commons Action APIs, through the polite client; 
 - **Flags:** `multiple_p18`, `p18_after_facts`, `category_cap_reached`, `file_missing`, `licence_not_allowed`, `licence_unknown`, `no_author`, `no_thumb_url`, `not_an_image` (not JPEG, PNG or WebP), and on a subject without a row, `category_search_busy`, `commons_category_unusable` and `multiple_commons_category` (an item naming several Commons categories uses none). Two spellings or a redirect that reach the same file give one row. File titles are sent in batches of at most 50 and at most about 6,000 percent-encoded characters, so a batch of long non-Latin names is split instead of building a URL the servers would refuse. A candidate is **usable** only when it has none of the blocking flags (`file_missing`, `licence_*`, `no_author`, `no_thumb_url`, `not_an_image`). Flagged candidates are kept for review.
 - **Coverage** (`report.md`, `coverage_by_country.csv`): the share of destination rows and of see/do listings with at least one usable candidate, with the counts and denominators. Listings without a Wikidata item cannot have a candidate and count against coverage.
 - **Files:** `photo_candidates.jsonl`, `photo_candidates_by_country.csv`, `coverage_by_country.csv`, `flags_by_country.csv`, `licences.csv` (files per licence, allowed or not), `report.md` and `manifest.json` (input hashes, rules version, output hashes). A second run on the same day gives identical files unless Commons search was busy in one of them (see `category_search_busy`).
+
+### `photo-select`
+
+```text
+.venv\Scripts\python -m catalogue photo-select --dump-date 20261101 --country IN
+```
+
+Offline and fast (seconds): no network, no settings. It reads `out/photos/<dump date>[-CC]/` (the `photo-candidates` output, hash-checked against its manifest and country filter) and `out/enrich/<dump date>[-CC]/` (which must be the very facts files `photo-candidates` read), and writes `out/photo_selection/<dump date>[-CC]/`. It picks **one main photo per subject** (every article, and every see/do listing with a facts row) from the usable candidates, by the rules in `config/photo_select.toml` (each with its reason; rows carry `approved_by = "auto:<rules_version>"`).
+
+- **Dropped first:** files in `overrides/rejected_photos.csv` (each with a written reason; an overridden file never comes back), anything that is not JPEG, PNG or WebP, file names with a whole word from the exclusion list (map, locator, flag, logo, coat of arms, emblem, seal, diagram, banner, chart, schematic), panoramas wider than 2.5:1, and the same image (SHA-1) under another name.
+- **Category-only photos must be about the subject:** a candidate that came only from the item's Commons category (not its own P18 image) needs a word of at least four letters in common with the subject's own name (a listing's own name, not its city's). Without it the India run chose butterflies, a Nepal peak, a Greenland iceberg and a portrait of a person (`only_unrelated_category`). It is a heuristic: a species photo whose name carries a region word still passes.
+- **Size gate:** the long side must be at least 1,024 px. Portrait is allowed (tall cards, the app crops) and flagged `portrait`. A candidate below the gate is never chosen, even if it is the only one: the subject is flagged `only_below_gate` and the app uses the city photo. `hero_quality` means a long side of at least 2,000 px.
+- **Order:** the Wikidata P18 image (preferred rank first), then Featured, Quality, Valued; the fifth step (unmarked files) is empty until geosearch exists. Inside a tier the score is size (double weight), closeness to 3:2 and a landscape bonus, so landscape and 3:2 outrank portrait at equal size and a much bigger portrait can still win; ties break on the file name. Several normal-rank P18 images are ranked by that score and flagged `multiple_p18_chosen_by_score`.
+- **No photo:** `photo: null` and a flag (`no_candidate`, `no_usable_candidate`, `only_excluded`, `only_unrelated_category`, `only_below_gate`). Never a guess.
+- **Report:** coverage (the share of destinations and see/do listings with a selected photo, using photo-candidates' denominators), the tiers, the flags, and **what the size gate costs**: covered subjects (a candidate survived the drops), those the gate removes (`lost_to_gate.csv`) and the percentage. Above 5% the report opens with a warning, because the rules are not frozen until that has been looked at.
+- **Files:** `photo_selection.jsonl` (one row per subject: the photo with its whole credit from B5, tier, score, alternatives, flags), `selection_by_country.csv`, `flags_by_country.csv`, `lost_to_gate.csv`, `spot_check_sample.csv` (a seeded sample of 30 rows for review), `report.md` and `manifest.json`. A second run on the same day gives identical files.
 
 ## Known follow-ups
 

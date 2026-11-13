@@ -14,7 +14,7 @@ TODAY = date(2026, 11, 13)
 RULES = load_selection_rules()
 FEATURED = "Featured pictures on Wikimedia Commons"
 
-DESTINATIONS = [dest(1), dest(2), dest(3), dest(4), dest(5), dest(6, iso="FR")]
+DESTINATIONS = [dest(1, "Jaipur"), dest(2), dest(3), dest(4), dest(5), dest(6, iso="FR")]
 LISTINGS = [
     listing(1, 1, "see:amber"),
     listing(1, 2, "do:walk", kind="do"),
@@ -190,11 +190,11 @@ def test_an_override_file_is_never_chosen(folders, tmp_path):
 
 
 def test_spot_check_sample_is_seeded_and_deterministic(tmp_path):
-    destinations = [dest(n) for n in range(1, 61)]
+    destinations = [dest(n, "Place") for n in range(1, 61)]
     candidates = [
         cr(n, f"P{n}.jpg", width=1100 + 20 * n, height=800)
         if n % 3
-        else cr(n, f"Q{n}.jpg", sources=("commons_category",), marks=["Quality images"])
+        else cr(n, f"Place Q{n}.jpg", sources=("commons_category",), marks=["Quality images"])
         for n in range(1, 61)
     ]
     folders = write_b5(
@@ -294,3 +294,58 @@ def test_a_damaged_row_is_named_by_file_only(folders, tmp_path):
     (photos / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(PipelineError, match="photo_candidates.jsonl has a damaged row"):
         run(folders, tmp_path)
+
+
+def test_a_category_only_photo_must_share_a_word_with_the_subjects_own_name(tmp_path):
+    destinations = [dest(1, "Darjeeling"), dest(2, "Gurgaon")]
+    candidates = [
+        cr(1, "Darjeeling tea garden.jpg", sources=("commons_category",), marks=["Quality images"]),
+        cr(
+            2,
+            "Iceberg in North Star Bay.jpg",
+            sources=("commons_category",),
+            marks=["Quality images"],
+        ),
+    ]
+    folders = write_b5(
+        tmp_path, destinations=destinations, listings=[], candidates=candidates, country_filter=None
+    )
+    result = run(folders, tmp_path)
+    rows = by_subject(rows_of(result))
+    assert rows[(1, 0)]["photo"]["commons_file"] == "Darjeeling tea garden.jpg"
+    assert rows[(2, 0)]["photo"] is None and rows[(2, 0)]["flags"] == ["only_unrelated_category"]
+    assert result.totals["flags"] == {"only_unrelated_category": 1}
+
+
+def test_a_listing_uses_its_own_name_not_its_citys(tmp_path):
+    destinations = [dest(1, "Delhi")]
+    listings = [listing(1, 1, "see:red-fort")]
+    candidates = [
+        cr(
+            1,
+            "Delhi street.jpg",
+            ordinal=1,
+            subject="listing",
+            sources=("commons_category",),
+            marks=["Quality images"],
+        ),
+        cr(
+            1,
+            "Red Fort wall.jpg",
+            ordinal=1,
+            subject="listing",
+            sources=("commons_category",),
+            marks=["Quality images"],
+            width=1500,
+            height=1000,
+        ),
+    ]
+    folders = write_b5(
+        tmp_path,
+        destinations=destinations,
+        listings=listings,
+        candidates=candidates,
+        country_filter=None,
+    )
+    rows = by_subject(rows_of(run(folders, tmp_path)))
+    assert rows[(1, 1)]["photo"]["commons_file"] == "Red Fort wall.jpg"

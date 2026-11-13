@@ -32,6 +32,7 @@ from catalogue.photos.select import (
     choose,
     load_rejected_files,
     load_selection_rules,
+    name_words,
 )
 
 SCHEMA_VERSION = 1
@@ -125,6 +126,21 @@ def _verify_photos(
     if _sha256(candidates) != outputs.get("photo_candidates.jsonl"):
         raise PipelineError("photo_candidates.jsonl does not match the photo-candidates manifest")
     return hashlib.sha256(manifest_bytes).hexdigest(), inputs, by_country
+
+
+def _subject_words(folder: Path, rules: SelectionRules) -> dict[tuple[int, int], frozenset[str]]:
+    """Name words of each subject itself: a destination's title, Wikidata label and English
+    Wikipedia title; a listing's label, English Wikipedia title and own key (not its city's)."""
+    words: dict[tuple[int, int], frozenset[str]] = {}
+    size = rules.category_min_word
+    for row in _rows(folder / "destination_facts.jsonl"):
+        text = " ".join(str(row.get(k) or "") for k in ("title", "label", "enwiki_title"))
+        words[(row["wikivoyage_page_id"], 0)] = frozenset(name_words(text, size))
+    for row in _rows(folder / "listing_facts.jsonl"):
+        key = str(row.get("listing_key") or "").split(":", 1)[-1].replace("-", " ")
+        text = " ".join([str(row.get("label") or ""), str(row.get("enwiki_title") or ""), key])
+        words[(row["page_id"], row["ordinal"])] = frozenset(name_words(text, size))
+    return words
 
 
 def _candidates_by_subject(
@@ -300,6 +316,7 @@ def run_photo_select(
     subjects = _subjects(enrich_folder)
     by_key = {(s.page_id, s.ordinal): s for s in subjects}
     candidates = _candidates_by_subject(photos_folder, by_key)
+    subject_words = _subject_words(enrich_folder, rules)
 
     read_at = today.isoformat()
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
@@ -313,7 +330,8 @@ def run_photo_select(
     covered = portrait = hero = 0
     with JsonlWriter(target / "photo_selection.jsonl") as out:
         for subject in subjects:
-            choice = choose(candidates.get((subject.page_id, subject.ordinal), []), rules, rejected)
+            key = (subject.page_id, subject.ordinal)
+            choice = choose(candidates.get(key, []), rules, rejected, subject_words[key])
             row = _row(subject, choice, rules, dump_date, read_at)
             out.write(row)
             rows.append(row)
