@@ -63,7 +63,15 @@ def test_two_different_commons_categories_are_not_guessed(client):
     respx.get(WD).mock(
         side_effect=fake_wikidata({"Q1": {"P373": [string_claim("A"), string_claim("B")]}})
     )
-    assert fetch_media_claims(client, ["Q1"])["Q1"].commons_category is None
+    claims = fetch_media_claims(client, ["Q1"])["Q1"]
+    assert claims.commons_category is None
+    assert claims.category_conflict is True
+
+
+@respx.mock
+def test_no_commons_category_is_not_a_conflict(client):
+    respx.get(WD).mock(side_effect=fake_wikidata({"Q1": {}}))
+    assert fetch_media_claims(client, ["Q1"])["Q1"].category_conflict is False
 
 
 @respx.mock

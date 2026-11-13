@@ -58,6 +58,8 @@ def _page(title, info):
         "extmetadata": extmetadata,
     }
     if info["thumb"]:
+        imageinfo["thumbwidth"] = min(1280, info["width"])
+        imageinfo["thumbheight"] = round(info["height"] * imageinfo["thumbwidth"] / info["width"])
         imageinfo["thumburl"] = (
             f"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/{name}/1280px-{name}"
         )

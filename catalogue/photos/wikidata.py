@@ -28,6 +28,7 @@ _QID = re.compile(r"Q[1-9][0-9]*")
 class MediaClaims:
     p18: tuple[tuple[str, str], ...] = ()  # (file name, statement rank), in statement order
     commons_category: str | None = None  # only when the item names exactly one
+    category_conflict: bool = False  # several named: none is used, and it is flagged
 
 
 def _parse(entity: dict) -> MediaClaims:
@@ -46,7 +47,7 @@ def _parse(entity: dict) -> MediaClaims:
         if isinstance(v, str) and v
     }
     only = next(iter(categories)) if len(categories) == 1 else None
-    return MediaClaims(tuple(files.items()), only)
+    return MediaClaims(tuple(files.items()), only, len(categories) > 1)
 
 
 def fetch_media_claims(client: PoliteClient, qids: Iterable[str]) -> dict[str, MediaClaims]:

@@ -57,6 +57,7 @@ class FileInfo:
     mime: str | None = None
     sha1: str | None = None
     thumb_url: str | None = None
+    thumb_width: int | None = None  # what Commons returned: never wider than the file
     author: str | None = None
     licence_code: str | None = None
     licence_name: str | None = None
@@ -208,6 +209,7 @@ def _file_info(requested: str, read: dict[str, Any], rules: PhotoRules) -> FileI
         mime=_text(info.get("mime")),
         sha1=_text(info.get("sha1")),
         thumb_url=_text(info.get("thumburl")),
+        thumb_width=_whole(info.get("thumbwidth")) if info.get("thumburl") else None,
         author=strip_html(_meta(meta, "Artist")),
         licence_code=_meta(meta, "License"),
         licence_name=_meta(meta, "LicenseShortName"),

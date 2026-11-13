@@ -163,9 +163,7 @@ def _subjects(folder: Path) -> list[Subject]:
     return sorted(subjects, key=lambda s: (s.page_id, s.ordinal))
 
 
-def _listing_totals(
-    enrich_folder: Path, listings_folder: Path, country_filter: str | None
-) -> Counter:
+def _listing_totals(enrich_folder: Path, listings_folder: Path) -> Counter:
     """See/do listings per country, from fetch-listings' own file. `listing_facts.jsonl` holds only
     listings that have an item or no usable point, so it cannot be the denominator. The file is
     accepted only when it is the one this enrich run read (manifest and file hashes)."""
@@ -244,6 +242,25 @@ def _add_category_candidates(
                 candidate.flags.add("category_cap_reached")
 
 
+def _merge_by_file(
+    files: Mapping[str, Candidate], infos: Mapping[str, FileInfo]
+) -> dict[str, tuple[str, Candidate]]:
+    """One candidate per file Commons finally reached: two requested names (`_` or space, a
+    redirect) for the same file are merged, keeping every source and flag."""
+    merged: dict[str, tuple[str, Candidate]] = {}
+    for requested in sorted(files):
+        candidate = files[requested]
+        final = infos[requested].title
+        if final not in merged:
+            merged[final] = (requested, Candidate(set(), candidate.rank))
+        target = merged[final][1]
+        target.sources |= candidate.sources
+        target.flags |= candidate.flags
+        if target.rank is None:
+            target.rank = candidate.rank
+    return merged
+
+
 def _is_usable(candidate: Candidate, info: FileInfo, rules: PhotoRules) -> bool:
     return info.status == "ok" and not (candidate.flags | _flags_for(info, rules)) & BLOCKING_FLAGS
 
@@ -302,7 +319,7 @@ def _row(
         "description_url": info.description_url,
         "url": info.url,
         "thumb_url": info.thumb_url,
-        "thumb_width": rules.thumb_width if ok else None,
+        "thumb_width": info.thumb_width,
         "width": info.width,
         "height": info.height,
         "mime": info.mime,
@@ -389,7 +406,7 @@ def run_photo_candidates(
     rules = rules if rules is not None else load_photo_rules()
     country_filter = country_iso.upper() if country_iso else None
     manifest_sha, input_hashes = verify_enrich_output(enrich_folder, country_filter, INPUT_FILES)
-    listing_totals = _listing_totals(enrich_folder, listings_folder, country_filter)
+    listing_totals = _listing_totals(enrich_folder, listings_folder)
     subjects = _subjects(enrich_folder)
 
     qids = {s.wikidata_id for s in subjects if s.wikidata_id}
@@ -398,6 +415,10 @@ def run_photo_candidates(
     # Owner's order: the item's own image first. Category search is one request per category and
     # is the expensive step, so it only runs for subjects that have no usable image yet.
     gathered = {s: (_p18_candidates(s, claims), set[str]()) for s in subjects}
+    for s in subjects:
+        media = claims.get(s.wikidata_id or "")
+        if media is not None and media.category_conflict:
+            gathered[s][1].add("multiple_commons_category")
     infos = fetch_file_info(client, {t for files, _ in gathered.values() for t in files}, rules)
     fallback = {
         s: media.commons_category
@@ -441,9 +462,9 @@ def run_photo_candidates(
                 flag_counts[flag] += 1
                 by_country_flag[(country, plural, flag)] += 1
             has_usable = False
-            for title in sorted(files):
+            for _final, (title, candidate) in sorted(_merge_by_file(files, infos).items()):
                 info = infos[title]
-                row = _row(subject, title, files[title], info, rules, dump_date, read_at)
+                row = _row(subject, title, candidate, info, rules, dump_date, read_at)
                 out.write(row)
                 row_count += 1
                 rows_by_country[(country, plural)] += 1

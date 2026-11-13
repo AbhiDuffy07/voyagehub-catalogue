@@ -37,6 +37,7 @@ def test_file_info_reads_licence_author_size_and_hotlinks(client):
     assert info.licence_url == "https://creativecommons.org/licenses/by-sa/4.0/"
     assert info.url.startswith("https://upload.wikimedia.org/")
     assert info.thumb_url.endswith("/1280px-Fort.jpg")
+    assert info.thumb_width == 1280
     assert info.description_url == "https://commons.wikimedia.org/wiki/File:Fort.jpg"
     assert info.marks == ("Quality images",)
     assert info.sha1 == "a" * 40
@@ -213,3 +214,10 @@ def test_other_search_errors_are_not_retried(client):
     )
     with pytest.raises(PipelineError, match="badvalue"):
         search_marked_files(client, ["A"], RULES, sleep=lambda s: None)
+
+
+@respx.mock
+def test_thumbnail_width_is_what_commons_returned_not_what_was_asked(client):
+    small = commons_file(width=800, height=600)
+    respx.get(COMMONS).mock(side_effect=fake_commons({"File:Small.jpg": small}))
+    assert fetch_file_info(client, ["File:Small.jpg"], RULES)["File:Small.jpg"].thumb_width == 800

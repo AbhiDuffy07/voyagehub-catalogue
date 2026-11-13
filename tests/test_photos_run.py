@@ -7,7 +7,8 @@ import pytest
 import respx
 
 from catalogue.errors import PipelineError
-from catalogue.photos.run import run_photo_candidates
+from catalogue.photos.commons import FileInfo
+from catalogue.photos.run import Candidate, _merge_by_file, run_photo_candidates
 from tests.apifakes import fake_wikidata, string_claim
 from tests.enrichfixture import destination_row, listing_fact, write_enrich_output
 from tests.photofakes import COMMONS, commons_file, fake_commons
@@ -363,3 +364,39 @@ def test_an_unlisted_licence_name_without_a_code_stays_unknown(client, folders, 
     mock(files={**FILES, "File:Pune.jpg": odd})
     pune = pick(rows_of(run(client, folders, tmp_path)), 5)["Pune.jpg"]
     assert "licence_unknown" in pune["flags"] and pune["usable"] is False
+
+
+@respx.mock
+def test_a_thumbnail_narrower_than_the_rule_says_its_real_width(client, folders, tmp_path):
+    mock(files={**FILES, "File:Pune.jpg": commons_file(width=800, height=600)})
+    pune = pick(rows_of(run(client, folders, tmp_path)), 5)["Pune.jpg"]
+    assert pune["thumb_width"] == 800
+
+
+@respx.mock
+def test_two_commons_categories_on_one_item_are_flagged_not_guessed(client, folders, tmp_path):
+    claims = {**CLAIMS, "Q3": {"P373": [string_claim("Delhi"), string_claim("New Delhi")]}}
+    search_seen = []
+    mock(claims=claims, search_seen=search_seen)
+    result = run(client, folders, tmp_path)
+    assert pick(rows_of(result), 3) == {}
+    assert search_seen == []
+    assert result.totals["flags"]["multiple_commons_category"] == 1
+
+
+def test_requests_that_reach_one_file_become_one_candidate():
+    a = Candidate({"wikidata_p18"}, "preferred", {"multiple_p18"})
+    b = Candidate({"commons_category"}, None, {"category_cap_reached"})
+    other = Candidate({"commons_category"})
+    infos = {
+        "File:A_b.jpg": FileInfo("ok", "File:A b.jpg"),
+        "File:A b.jpg": FileInfo("ok", "File:A b.jpg"),
+        "File:C.jpg": FileInfo("ok", "File:C.jpg"),
+    }
+    merged = _merge_by_file({"File:A_b.jpg": a, "File:A b.jpg": b, "File:C.jpg": other}, infos)
+    assert sorted(merged) == ["File:A b.jpg", "File:C.jpg"]
+    requested, candidate = merged["File:A b.jpg"]
+    assert requested == "File:A b.jpg"
+    assert candidate.sources == {"wikidata_p18", "commons_category"}
+    assert candidate.flags == {"multiple_p18", "category_cap_reached"}
+    assert candidate.rank == "preferred"
