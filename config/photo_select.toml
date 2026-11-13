@@ -34,6 +34,16 @@ even when it is the only one: the subject is flagged and the app shows the city 
 # butterflies and moths, a Nepal peak and a Greenland iceberg for a Gurgaon destination, a painting,
 # a portrait of a person on a temple. A subject left without one falls back to the city photo.
 min_word_length = 4
+# Words that name a kind of place, not a place. They never count as a match on either side
+# ("Palace of Winds" is not "Lake Palace"), and a subject named only with them matches nothing.
+generic_words = [
+  "fort", "forts", "temple", "temples", "palace", "palaces", "hindu", "national", "park", "parks",
+  "lake", "lakes", "beach", "beaches", "museum", "church", "mosque", "tomb", "garden", "gardens",
+  "river", "hill", "hills", "island", "islands", "city", "town", "village", "district", "shrine",
+  "monastery", "cave", "caves", "falls", "station", "bridge", "market", "heritage", "world",
+  "india", "indian", "north", "south", "east", "west", "central", "saint", "sacred", "view",
+  "sanctuary", "wildlife", "reserve", "forest", "valley", "mountain", "mountains", "road",
+]
 
 [tiers]
 # Order of choice: Wikidata P18 (preferred rank first), then these, then everything else (tier 5,

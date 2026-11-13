@@ -1,5 +1,3 @@
-import csv
-
 import pytest
 
 from catalogue.errors import PipelineError
@@ -297,10 +295,6 @@ def test_covered_means_a_candidate_survived_the_drops_before_the_gate():
     assert pick([cand("A.jpg", width=2000, height=1500)]).covered is True
 
 
-def test_the_csv_module_is_not_needed():
-    assert csv  # keeps the import honest for the override-file tests above
-
-
 # --- category-only candidates must be about the subject ---------------------------------
 
 
@@ -352,3 +346,30 @@ def test_unrelated_category_photos_do_not_count_as_covered_for_the_gate_numbers(
     assert pick([small_unrelated], words=frozenset({"gurgaon"})).flags == {
         "only_unrelated_category"
     }
+
+
+def test_generic_words_do_not_count_as_a_name_match():
+    palace_of_winds = category_only("Palace of Winds.jpg")
+    choice = pick([palace_of_winds], words=frozenset({"lake"}))  # "Lake Palace" -> lake, palace
+    assert choice.flags == {"only_unrelated_category"}
+    assert "palace" in RULES.generic_words and "temple" in RULES.generic_words
+
+
+def test_a_distinctive_word_still_matches_when_generic_ones_are_also_present():
+    photo = category_only("Amer Fort wall.jpg")
+    words = name_words("Amer Fort", 4, RULES.generic_words)
+    assert words == {"amer"}
+    assert pick([photo], words=frozenset(words)).chosen is not None
+
+
+def test_name_words_can_drop_generic_words():
+    assert name_words("Hindu Temple of Joshimath", 4, frozenset({"hindu", "temple"})) == {
+        "joshimath"
+    }
+
+
+def test_a_subject_named_only_with_generic_words_matches_no_category_photo():
+    words = name_words("Hindu Temple", 4, RULES.generic_words)
+    assert words == set()
+    photo = category_only("Hindu temple interior.jpg")
+    assert pick([photo], words=frozenset(words)).flags == {"only_unrelated_category"}

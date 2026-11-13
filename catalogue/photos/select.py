@@ -36,6 +36,7 @@ class SelectionRules:
     hero_long_side: int
     tier_marks: dict[str, frozenset[str]]
     category_min_word: int
+    generic_words: frozenset[str]
     size_cap: int
     size_weight: float
     target_ratio: float
@@ -116,6 +117,7 @@ def load_selection_rules(path: Path = SELECT_RULES_PATH) -> SelectionRules:
         min_long_side=_number(gate, "min_long_side", source, whole=True),
         hero_long_side=_number(gate, "hero_long_side", source, whole=True),
         category_min_word=_number(category, "min_word_length", source, whole=True),
+        generic_words=frozenset(_strings(category, "generic_words", source)),
         tier_marks={
             name: frozenset(_strings(tiers, name, source))
             for name in ("featured", "quality", "valued")
@@ -159,12 +161,13 @@ def load_rejected_files(path: Path = REJECTED_PATH) -> frozenset[str]:
     return frozenset(found)
 
 
-def name_words(text: str, min_length: int = 4) -> set[str]:
+def name_words(text: str, min_length: int = 4, exclude: frozenset[str] = frozenset()) -> set[str]:
     """Lower-case words of at least `min_length` letters, accents folded (`Bhāratpur` is
-    `bharatpur`). Digits and punctuation separate words."""
+    `bharatpur`). Digits and punctuation separate words. Words in `exclude` are left out."""
     folded = unicodedata.normalize("NFKD", text).casefold()
     plain = "".join(c for c in folded if not unicodedata.combining(c))
-    return {w for w in re.findall(r"[^\W\d_]+", plain) if len(w) >= min_length}
+    found = re.findall(r"[^\W\d_]+", plain)
+    return {w for w in found if len(w) >= min_length and w not in exclude}
 
 
 # --- choosing -----------------------------------------
@@ -208,7 +211,8 @@ def _about_the_subject(
     if "wikidata_p18" in row["sources"]:
         return True  # the item's own image
     stem = str(row["commons_file"]).rsplit(".", 1)[0]
-    return bool(name_words(stem, rules.category_min_word) & subject_words)
+    words = name_words(stem, rules.category_min_word, rules.generic_words)
+    return bool(words & subject_words)
 
 
 def _tier(row: dict[str, Any], rules: SelectionRules) -> tuple[int, int]:

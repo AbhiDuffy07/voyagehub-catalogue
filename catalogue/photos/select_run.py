@@ -132,14 +132,14 @@ def _subject_words(folder: Path, rules: SelectionRules) -> dict[tuple[int, int],
     """Name words of each subject itself: a destination's title, Wikidata label and English
     Wikipedia title; a listing's label, English Wikipedia title and own key (not its city's)."""
     words: dict[tuple[int, int], frozenset[str]] = {}
-    size = rules.category_min_word
+    size, generic = rules.category_min_word, rules.generic_words
     for row in _rows(folder / "destination_facts.jsonl"):
         text = " ".join(str(row.get(k) or "") for k in ("title", "label", "enwiki_title"))
-        words[(row["wikivoyage_page_id"], 0)] = frozenset(name_words(text, size))
+        words[(row["wikivoyage_page_id"], 0)] = frozenset(name_words(text, size, generic))
     for row in _rows(folder / "listing_facts.jsonl"):
         key = str(row.get("listing_key") or "").split(":", 1)[-1].replace("-", " ")
         text = " ".join([str(row.get("label") or ""), str(row.get("enwiki_title") or ""), key])
-        words[(row["page_id"], row["ordinal"])] = frozenset(name_words(text, size))
+        words[(row["page_id"], row["ordinal"])] = frozenset(name_words(text, size, generic))
     return words
 
 
@@ -231,6 +231,16 @@ def _spot_sample(rows: list[dict[str, Any]], rules: SelectionRules) -> list[list
                 ]
             )
     return sample
+
+
+def _gate_stats(covered: int, lost: int) -> dict[str, Any]:
+    """The gate cost. "Over 5%" is tested on the exact ratio; only the shown percent rounds."""
+    return {
+        "covered": covered,
+        "lost": lost,
+        "percent": round(100 * lost / covered, 1) if covered else 0.0,
+        "over_limit": lost * 100 > GATE_LIMIT_PERCENT * covered,
+    }
 
 
 def _report(totals: Mapping[str, Any], dump_date: str, rules: SelectionRules) -> str:
@@ -385,7 +395,6 @@ def run_photo_select(
             ["(all)", plural, total_all, selected_all, _percent(selected_all, total_all)]
         )
 
-    percent = round(100 * len(lost) / covered, 1) if covered else 0.0
     totals = {
         "subjects": len(subjects),
         "articles": sum(s.kind == "article" for s in subjects),
@@ -395,12 +404,7 @@ def run_photo_select(
         "hero_quality": hero,
         "tiers": dict(sorted(tiers.items())),
         "flags": dict(sorted(flag_counts.items())),
-        "gate": {
-            "covered": covered,
-            "lost": len(lost),
-            "percent": percent,
-            "over_limit": percent > GATE_LIMIT_PERCENT,
-        },
+        "gate": _gate_stats(covered, len(lost)),
         "coverage": coverage,
     }
 

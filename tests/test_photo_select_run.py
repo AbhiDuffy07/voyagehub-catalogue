@@ -6,7 +6,7 @@ import pytest
 
 from catalogue.errors import PipelineError
 from catalogue.photos.select import load_selection_rules
-from catalogue.photos.select_run import run_photo_select
+from catalogue.photos.select_run import _gate_stats, run_photo_select
 from tests.photoselectfixture import candidate_row as cr
 from tests.photoselectfixture import dest, listing, sha, write_b5
 
@@ -319,7 +319,7 @@ def test_a_category_only_photo_must_share_a_word_with_the_subjects_own_name(tmp_
 
 def test_a_listing_uses_its_own_name_not_its_citys(tmp_path):
     destinations = [dest(1, "Delhi")]
-    listings = [listing(1, 1, "see:red-fort")]
+    listings = [listing(1, 1, "see:amer-fort")]
     candidates = [
         cr(
             1,
@@ -331,7 +331,7 @@ def test_a_listing_uses_its_own_name_not_its_citys(tmp_path):
         ),
         cr(
             1,
-            "Red Fort wall.jpg",
+            "Amer Fort wall.jpg",
             ordinal=1,
             subject="listing",
             sources=("commons_category",),
@@ -348,4 +348,23 @@ def test_a_listing_uses_its_own_name_not_its_citys(tmp_path):
         country_filter=None,
     )
     rows = by_subject(rows_of(run(folders, tmp_path)))
-    assert rows[(1, 1)]["photo"]["commons_file"] == "Red Fort wall.jpg"
+    assert rows[(1, 1)]["photo"]["commons_file"] == "Amer Fort wall.jpg"
+
+
+@pytest.mark.parametrize(
+    "covered,lost,percent,over",
+    [
+        (2500, 126, 5.0, True),  # 5.04% shows as 5.0 but is over the line
+        (2000, 100, 5.0, False),  # exactly 5% is not over
+        (3490, 468, 13.4, True),
+        (40, 0, 0.0, False),
+        (0, 0, 0.0, False),
+    ],
+)
+def test_the_five_percent_line_is_tested_on_the_unrounded_ratio(covered, lost, percent, over):
+    assert _gate_stats(covered, lost) == {
+        "covered": covered,
+        "lost": lost,
+        "percent": percent,
+        "over_limit": over,
+    }
