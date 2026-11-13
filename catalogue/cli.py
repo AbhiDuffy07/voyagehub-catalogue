@@ -1,8 +1,8 @@
 """Command line: `python -m catalogue <command>`.
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
-enrich-wikidata, wikipedia-summary and derive-timezone in B4; the rest arrive one by one in later
-sessions).
+enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5; the rest
+arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -27,6 +27,7 @@ from catalogue.enrich.timezones import run_derive_timezone
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
+from catalogue.photos.run import run_photo_candidates
 from catalogue.settings import Settings, SettingsError, load_settings
 
 SITEINFO_URL = "https://en.wikivoyage.org/w/api.php"
@@ -123,6 +124,20 @@ def _parser() -> argparse.ArgumentParser:
         "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
     )
     summary.add_argument("--out-dir", type=Path, default=Path("out/summaries"))
+
+    photos = commands.add_parser(
+        "photo-candidates",
+        help="gather Commons photo candidates (network; reads the enrich-wikidata output)",
+    )
+    photos.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    photos.add_argument("--country", help="only this ISO country code (same as enrich-wikidata)")
+    photos.add_argument(
+        "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
+    )
+    photos.add_argument(
+        "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
+    )
+    photos.add_argument("--out-dir", type=Path, default=Path("out/photos"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -296,6 +311,31 @@ def _wikipedia_summary(
     print(f"files: {result.output_dir}")
 
 
+def _photo_candidates(
+    args: argparse.Namespace,
+    environ: Mapping[str, str] | None,
+    env_file: Path | str | None,
+    client_factory: Callable[[Settings], PoliteClient],
+) -> None:
+    settings = load_settings(environ, env_file)
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    client = client_factory(settings)
+    try:
+        result = run_photo_candidates(
+            client,
+            enrich_folder=args.enrich_dir / folder,
+            listings_folder=args.listings_dir / folder,
+            out_dir=args.out_dir,
+            dump_date=args.dump_date,
+            today=datetime.now(UTC).date(),
+            country_iso=args.country,
+        )
+    finally:
+        client.close()
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -370,6 +410,8 @@ def main(
             _enrich_wikidata(args, environ, env_file, client_factory)
         elif args.command == "wikipedia-summary":
             _wikipedia_summary(args, environ, env_file, client_factory)
+        elif args.command == "photo-candidates":
+            _photo_candidates(args, environ, env_file, client_factory)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:

@@ -1,0 +1,39 @@
+# Rules for photo-candidates (B5). They decide which Commons files are gathered and which are
+# flagged; nothing here scores or selects (that is B6). Nothing is country-specific.
+#
+# Change a value only together with its reason, and bump rules_version.
+
+rules_version = 1
+
+[licences]
+# Matched (whole string, lower case) against the licence code Commons reports in extmetadata
+# (`License`, such as `cc-by-sa-4.0`, `cc0`, `pd`, `fal`). A file whose code matches none of these
+# is flagged `licence_not_allowed`; a file with no code is flagged `licence_unknown`.
+allowed = [
+  "cc0",
+  "pd",
+  "pd-[a-z0-9-]+",
+  'cc-by-(sa-)?(2\.0|2\.5|3\.0|4\.0)(-(?!nc|nd)[a-z]{2})?',
+  "fal",
+]
+reason = """Open licences only (design rule 5): CC0, public domain, CC BY and CC BY-SA 2.0 to 4.0 \
+(including two-letter country ports such as `-at`) and the Free Art Licence. Non-commercial (`nc`) and no-derivatives \
+(`nd`) licences never match, because the pattern only allows `by` and `by-sa`."""
+
+[files]
+mime_types = ["image/jpeg", "image/png", "image/webp"]
+mime_reason = "Photographs only: maps, diagrams and logos are mostly SVG, PDF or TIFF."
+thumb_width = 1280
+thumb_reason = """Hotlinked thumbnail width, one of Commons' standard steps (the Commons hotlink \
+policy asks for standard sizes). 1280 px is the long-side minimum B6 expects for non-hero photos."""
+
+[commons]
+quality_categories = [
+  "Quality images",
+  "Featured pictures on Wikimedia Commons",
+  "Valued images",
+]
+category_cap = 10
+cap_reason = """At most this many files per subject come from its Commons category, and only \
+files carrying a quality mark (owner ruling, 2026-11-13). The photos of the item's own P18 are \
+never capped."""
