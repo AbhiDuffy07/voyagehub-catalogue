@@ -12,7 +12,6 @@ some, and always with its links, licence and attribution (CC BY-SA 4.0).
 """
 
 import hashlib
-import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from catalogue.discover.output import _csv_text, write_manifest, write_text
-from catalogue.enrich.inputs import _rows, _sha256
+from catalogue.enrich.inputs import _rows, verify_enrich_output
 from catalogue.enrich.summary import (
     LICENCE,
     LICENCE_URL,
@@ -81,41 +80,6 @@ class SummaryResult:
         if totals["flags"]:
             lines.append(", ".join(f"{k} {v}" for k, v in totals["flags"].items()))
         return "\n".join(lines)
-
-
-def _verify(folder: Path, country_filter: str | None) -> tuple[str, dict[str, str]]:
-    """Check the enrich output belongs to this run; return its manifest hash and input hashes."""
-    manifest_path = folder / "manifest.json"
-    if not manifest_path.is_file():
-        raise PipelineError(f"manifest.json not found in {folder}; run enrich-wikidata first")
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        recorded_country = manifest["country_filter"]
-        recorded = manifest["outputs_sha256"]
-    except (OSError, ValueError, KeyError, TypeError):
-        raise PipelineError(
-            "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
-        ) from None
-    if not isinstance(recorded, dict):
-        raise PipelineError(
-            "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
-        )
-    if recorded_country != country_filter:
-        raise PipelineError(
-            "enrich-wikidata was run for a different country filter; use the same --country"
-        )
-    hashes: dict[str, str] = {}
-    for name in INPUT_FILES:
-        path = folder / name
-        if not path.is_file():
-            raise PipelineError(f"{name} not found in {folder}")
-        try:
-            hashes[name] = _sha256(path)
-        except OSError:
-            raise PipelineError(f"{name} could not be read") from None
-        if hashes[name] != recorded.get(name):
-            raise PipelineError(f"{name} does not match the enrich-wikidata manifest")
-    return hashlib.sha256(manifest_path.read_bytes()).hexdigest(), hashes
 
 
 def _subjects(folder: Path) -> list[Subject]:
@@ -275,7 +239,7 @@ def run_wikipedia_summary(
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_summary_rules()
     country_filter = country_iso.upper() if country_iso else None
-    manifest_sha, input_hashes = _verify(enrich_folder, country_filter)
+    manifest_sha, input_hashes = verify_enrich_output(enrich_folder, country_filter, INPUT_FILES)
     subjects = _subjects(enrich_folder)
 
     pages = fetch_summaries(client, {s.title for s in subjects})
