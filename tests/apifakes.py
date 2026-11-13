@@ -221,3 +221,66 @@ def entity(claims, *, revid=1, label=None, description=None, enwiki=None):
     if enwiki:
         body["sitelinks"] = {"enwiki": {"site": "enwiki", "title": enwiki, "badges": []}}
     return body
+
+
+def fake_wikipedia_summaries(pages, redirects=None, seen=None, split=None, omit=()):
+    """Answer an enwiki `prop=extracts|revisions|pageprops` query (formatversion 2).
+
+    `pages` maps a canonical title to {"extract": str | None, "revid": int, "timestamp": str,
+    "disambiguation": bool}; a title not listed is missing. `redirects` maps a title to the title
+    it redirects to. `split=N` makes the reply carry only N pages and a `continue` block, the rest
+    following when the request passes `excontinue`. `omit` lists titles the reply leaves out
+    (a truncated reply). Like the real API, it normalises underscores and the first letter and
+    returns pages in a different order from the request.
+    """
+    redirects = redirects or {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if seen is not None:
+            seen.append(dict(params))
+        normalized, redirected, found = [], [], []
+        for raw in params["titles"].split("|"):
+            title = raw.replace("_", " ")
+            title = title[:1].upper() + title[1:]
+            if title != raw:
+                normalized.append({"from": raw, "to": title})
+            hops = 0
+            while title in redirects and params.get("redirects") and hops < 5:
+                redirected.append({"from": title, "to": redirects[title]})
+                title = redirects[title]
+                hops += 1
+            if title in omit:
+                continue
+            if title in pages:
+                data = pages[title]
+                page = {"pageid": 1, "ns": 0, "title": title}
+                if data.get("extract") is not None:
+                    page["extract"] = data["extract"]
+                if data.get("revid") is not None:
+                    page["revisions"] = [
+                        {"revid": data["revid"], "parentid": 0, "timestamp": data["timestamp"]}
+                    ]
+                if data.get("disambiguation"):
+                    page["pageprops"] = {"disambiguation": ""}
+            else:
+                page = {"ns": 0, "title": title, "missing": True}
+            if page not in found:
+                found.append(page)
+        query = {"pages": found[::-1]}
+        body = {"batchcomplete": True, "query": query}
+        offset = int(params.get("excontinue", 0))
+        if split is not None:
+            if offset == 0:
+                query["pages"] = found[:split]
+                body = {"continue": {"excontinue": split, "continue": "||"}, "query": query}
+            else:
+                query["pages"] = found[offset:]
+        if offset == 0:
+            if normalized:
+                query["normalized"] = normalized
+            if redirected:
+                query["redirects"] = redirected
+        return httpx.Response(200, json=body)
+
+    return answer

@@ -1,7 +1,8 @@
 """Command line: `python -m catalogue <command>`.
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
-enrich-wikidata and derive-timezone in B4; the rest arrive one by one in later sessions).
+enrich-wikidata, wikipedia-summary and derive-timezone in B4; the rest arrive one by one in later
+sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -21,6 +22,7 @@ from catalogue.discover.overrides import load_country_iso_overrides
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.enrich.run import run_enrich_wikidata
+from catalogue.enrich.summary_run import run_wikipedia_summary
 from catalogue.enrich.timezones import run_derive_timezone
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
@@ -110,6 +112,17 @@ def _parser() -> argparse.ArgumentParser:
         "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
     )
     enrich.add_argument("--out-dir", type=Path, default=Path("out/enrich"))
+
+    summary = commands.add_parser(
+        "wikipedia-summary",
+        help="add short credited Wikipedia summaries (network; reads the enrich-wikidata output)",
+    )
+    summary.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    summary.add_argument("--country", help="only this ISO country code (same as enrich-wikidata)")
+    summary.add_argument(
+        "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
+    )
+    summary.add_argument("--out-dir", type=Path, default=Path("out/summaries"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -259,6 +272,30 @@ def _enrich_wikidata(
     print(f"files: {result.output_dir}")
 
 
+def _wikipedia_summary(
+    args: argparse.Namespace,
+    environ: Mapping[str, str] | None,
+    env_file: Path | str | None,
+    client_factory: Callable[[Settings], PoliteClient],
+) -> None:
+    settings = load_settings(environ, env_file)
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    client = client_factory(settings)
+    try:
+        result = run_wikipedia_summary(
+            client,
+            enrich_folder=args.enrich_dir / folder,
+            out_dir=args.out_dir,
+            dump_date=args.dump_date,
+            today=datetime.now(UTC).date(),
+            country_iso=args.country,
+        )
+    finally:
+        client.close()
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -331,6 +368,8 @@ def main(
             _derive_timezone(args)
         elif args.command == "enrich-wikidata":
             _enrich_wikidata(args, environ, env_file, client_factory)
+        elif args.command == "wikipedia-summary":
+            _wikipedia_summary(args, environ, env_file, client_factory)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:

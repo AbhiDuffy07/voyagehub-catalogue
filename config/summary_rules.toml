@@ -1,0 +1,16 @@
+# Rules for wikipedia-summary (B4b). They only decide what is flagged; no text is dropped,
+# rewritten or shortened because of them.
+#
+# Change a number only together with its reason, and bump rules_version. Nothing in the code is
+# country-specific.
+
+rules_version = 1
+
+[summary.very_short]
+chars = 80
+reason = """A lead shorter than this is a stub or a one-line definition ("X is a village in \
+Y."), too thin to show as an overview. It is flagged `very_short` and kept; a later step decides \
+what to show. Measured on the world run (dump 20261101): of 75,403 leads, the shortest is 23 \
+characters, p1 98, p5 157, the median 554, p90 1,565; 300 (0.4%) are under 80. The India run \
+gave the same picture (29 of 4,105, 0.7%; median 498). The limit catches the genuine one-line \
+stubs and little else, so it stays at 80."""
