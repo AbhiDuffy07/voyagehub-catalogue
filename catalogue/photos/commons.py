@@ -268,7 +268,8 @@ def fetch_file_info(
 def _search_reply(
     client: PoliteClient, params: dict[str, str | int], sleep: Callable[[float], None]
 ) -> dict[str, Any]:
-    """One search, waiting out Commons' "search is too busy" answer (a few times, then stopping)."""
+    """One search, waiting out Commons' "search is too busy" answer; after the retries it raises
+    SearchBusyError for the caller to flag."""
     for attempt in range(BUSY_RETRIES + 1):
         try:
             return api_get(client, COMMONS_API, params)
@@ -325,7 +326,9 @@ def search_marked_files(
         name: CategoryFiles(unusable=True) for name in names if _UNSAFE_CATEGORY.search(name)
     }
     todo = [name for name in names if name not in results]
-    streak = 0  # categories in a row that stayed busy (searches run one at a time)
+    # Categories in a row that stayed busy. Safe only because searches run one at a time
+    # (SEARCH_WORKERS = 1): with more workers the give-up point would depend on thread timing.
+    streak = 0
 
     def work(name: str) -> CategoryFiles:
         nonlocal streak
