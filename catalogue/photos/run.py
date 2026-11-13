@@ -8,8 +8,9 @@ sources, in the owner's order of preference:
    when an item has several, so every item without a stored image is re-read from Wikidata; if it
    has several images, every distinct file becomes a candidate flagged `multiple_p18` and none is
    chosen;
-2. files with a Commons quality mark (Quality, Featured, Valued) in the item's Commons category
-   (P373), at most `category_cap` per subject.
+2. only for subjects with no usable image from step 1: files with a Commons quality mark
+   (Quality, Featured, Valued) in the item's Commons category (P373), at most `category_cap` per
+   subject. Searching a category is one request, so the step is kept for the subjects that need it.
 
 Each candidate keeps its Commons file, size, hotlink URLs, plain-text author, licence code, name and
 link, and an attribution line. Nothing is scored or chosen here (that is B6), nothing is guessed (a
@@ -36,7 +37,12 @@ from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import _safe_cell, parse_dump_date
-from catalogue.photos.commons import FileInfo, fetch_file_info, search_marked_files
+from catalogue.photos.commons import (
+    CategoryFiles,
+    FileInfo,
+    fetch_file_info,
+    search_marked_files,
+)
 from catalogue.photos.rules import PhotoRules, load_photo_rules
 from catalogue.photos.wikidata import MediaClaims, fetch_media_claims
 
@@ -199,43 +205,47 @@ def _listing_totals(
 # --- candidates ---------------------------------------------------------------------------------
 
 
-def _gather(
-    subject: Subject,
-    claims: Mapping[str, MediaClaims],
-    categories: Mapping[str, Any],
-) -> tuple[dict[str, Candidate], set[str]]:
-    """The candidate files of one subject (by `File:` title) and flags that belong to no file."""
+def _add(
+    found: dict[str, Candidate], name: str, source: str, rank: str | None, *flags: str
+) -> None:
+    candidate = found.setdefault(f"File:{name}", Candidate())
+    candidate.sources.add(source)
+    candidate.flags.update(flags)
+    if rank is not None:
+        candidate.rank = rank
+
+
+def _p18_candidates(subject: Subject, claims: Mapping[str, MediaClaims]) -> dict[str, Candidate]:
+    """The subject's own Wikidata image(s), by `File:` title. Several are all kept, none chosen."""
     found: dict[str, Candidate] = {}
-    subject_flags: set[str] = set()
     media = claims.get(subject.wikidata_id or "")
-
-    def add(name: str, source: str, rank: str | None, *flags: str) -> None:
-        candidate = found.setdefault(f"File:{name}", Candidate())
-        candidate.sources.add(source)
-        candidate.flags.update(flags)
-        if rank is not None:
-            candidate.rank = rank
-
     if subject.image:
         rank = dict(media.p18).get(subject.image) if media else None
-        add(subject.image, "wikidata_p18", rank)
+        _add(found, subject.image, "wikidata_p18", rank)
     elif media and media.p18:
         extra = "multiple_p18" if len(media.p18) > 1 else "p18_after_facts"
         for name, rank in media.p18:
-            add(name, "wikidata_p18", rank, extra)
-    if media and media.commons_category:
-        entry = categories.get(media.commons_category)
-        if entry is not None and entry.unusable:
-            subject_flags.add("commons_category_unusable")
-        elif entry is not None:
-            for title in entry.files:
-                if title.startswith("File:"):
-                    add(title.removeprefix("File:"), "commons_category", None)
-            if entry.capped:
-                for candidate in found.values():
-                    if "commons_category" in candidate.sources:
-                        candidate.flags.add("category_cap_reached")
-    return found, subject_flags
+            _add(found, name, "wikidata_p18", rank, extra)
+    return found
+
+
+def _add_category_candidates(
+    found: dict[str, Candidate], subject_flags: set[str], entry: CategoryFiles
+) -> None:
+    if entry.unusable:
+        subject_flags.add("commons_category_unusable")
+        return
+    for title in entry.files:
+        if title.startswith("File:"):
+            _add(found, title.removeprefix("File:"), "commons_category", None)
+    if entry.capped:
+        for candidate in found.values():
+            if "commons_category" in candidate.sources:
+                candidate.flags.add("category_cap_reached")
+
+
+def _is_usable(candidate: Candidate, info: FileInfo, rules: PhotoRules) -> bool:
+    return info.status == "ok" and not (candidate.flags | _flags_for(info, rules)) & BLOCKING_FLAGS
 
 
 def _flags_for(info: FileInfo, rules: PhotoRules) -> set[str]:
@@ -243,7 +253,8 @@ def _flags_for(info: FileInfo, rules: PhotoRules) -> set[str]:
         return {"file_missing"}
     flags: set[str] = set()
     if info.licence_code is None:
-        flags.add("licence_unknown")
+        if not (info.licence_name and rules.licence_name_allowed(info.licence_name)):
+            flags.add("licence_unknown")
     elif not rules.licence_allowed(info.licence_code):
         flags.add("licence_not_allowed")
     if info.author is None:
@@ -253,6 +264,10 @@ def _flags_for(info: FileInfo, rules: PhotoRules) -> set[str]:
     if info.thumb_url is None:
         flags.add("no_thumb_url")
     return flags
+
+
+def _licence_ok(code: str, name: str, rules: PhotoRules) -> bool:
+    return rules.licence_allowed(code) if code else rules.licence_name_allowed(name)
 
 
 def _attribution(info: FileInfo) -> str | None:
@@ -322,6 +337,8 @@ def _report(totals: Mapping[str, Any], dump_date: str, rules: PhotoRules) -> str
         f"- subjects with a Wikidata item: {totals['with_item']}",
         f"- candidate rows: {totals['rows']} ({totals['usable']} usable); "
         f"distinct Commons files: {totals['files']}",
+        f"- Commons categories searched (subjects with no usable image of their own): "
+        f"{totals['categories_searched']}",
         f"- rules version: {rules.version}",
         "",
         "## Coverage: subjects with at least one usable candidate",
@@ -377,12 +394,29 @@ def run_photo_candidates(
 
     qids = {s.wikidata_id for s in subjects if s.wikidata_id}
     claims = fetch_media_claims(client, qids)
-    wanted_categories = {m.commons_category for m in claims.values() if m.commons_category}
-    categories = search_marked_files(client, wanted_categories, rules)
 
-    gathered = {s: _gather(s, claims, categories) for s in subjects}
-    titles = {title for files, _ in gathered.values() for title in files}
-    infos = fetch_file_info(client, titles, rules)
+    # Owner's order: the item's own image first. Category search is one request per category and
+    # is the expensive step, so it only runs for subjects that have no usable image yet.
+    gathered = {s: (_p18_candidates(s, claims), set[str]()) for s in subjects}
+    infos = fetch_file_info(client, {t for files, _ in gathered.values() for t in files}, rules)
+    fallback = {
+        s: media.commons_category
+        for s in subjects
+        if (media := claims.get(s.wikidata_id or "")) is not None
+        and media.commons_category
+        and not any(_is_usable(c, infos[t], rules) for t, c in gathered[s][0].items())
+    }
+    categories = search_marked_files(client, set(fallback.values()), rules)
+    for s, category in fallback.items():
+        _add_category_candidates(gathered[s][0], gathered[s][1], categories[category])
+    infos.update(
+        fetch_file_info(
+            client,
+            {t for files, _ in gathered.values() for t in files if t not in infos},
+            rules,
+        )
+    )
+    titles = set(infos)
 
     read_at = today.isoformat()
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
@@ -478,7 +512,7 @@ def run_photo_candidates(
                     _safe_cell(code),
                     _safe_cell(name),
                     count,
-                    "yes" if code and rules.licence_allowed(code) else "no",
+                    "yes" if _licence_ok(code, name, rules) else "no",
                 ]
                 for (code, name), count in sorted(licences.items(), key=lambda kv: (-kv[1], kv[0]))
             ],
@@ -492,6 +526,7 @@ def run_photo_candidates(
         "rows": row_count,
         "usable": usable_rows,
         "files": len(titles),
+        "categories_searched": len(set(fallback.values())),
         "flags": dict(sorted(flag_counts.items())),
         "sources": dict(sorted(sources.items())),
         "coverage": coverage,

@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and five jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary` and `derive-timezone`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and six jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone` and `photo-candidates`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -99,6 +99,23 @@ Offline and fast (seconds): no network, no settings. It reads `out/enrich/<dump 
 - **Credit, wherever zones are published:** "Time zones: timezone-boundary-builder, © OpenStreetMap contributors, ODbL". Only zone names are stored (no boundary data), and rows derived from coordinates carry this credit and the licence.
 - **Files:** `destination_timezones.jsonl` (one row per destination), `timezones_by_country.csv`, `timezone_disagreements.csv`, `report.md` and `manifest.json` (input hashes, `tzfpy` and data versions, output hashes).
 
+### `photo-candidates`
+
+```text
+.venv\Scripts\python -m catalogue photo-candidates --dump-date 20261101 --country IN
+```
+
+Network (Wikidata and Wikimedia Commons Action APIs, through the polite client; needs `CONTACT_EMAIL`). Writes local files only to `out/photos/<dump date>[-CC]/`. It gathers photo **candidates**; choosing among them is B6. It reads `out/enrich/<dump date>[-CC]/` (hash-checked against that run's manifest and country filter) and `out/listings/<dump date>[-CC]/listings.jsonl` (checked against the manifest hash `enrich-wikidata` recorded), which is the denominator for listing coverage. Photos are hotlinked, never copied. The console prints counts only.
+
+- **Subjects:** every article, and every see/do listing that has a Wikidata item.
+- **Source 1, the item's own image (P18):** `enrich-wikidata` stores one image name and drops it when an item has several, so every item without a stored image is re-read from Wikidata (50 items per request, same rank rule as B4: deprecated statements ignored, preferred ones win). Several images: every distinct file becomes a candidate flagged `multiple_p18`, with its rank, and none is chosen. An item that gained a single image since `enrich-wikidata` is flagged `p18_after_facts`.
+- **Source 2, Commons quality marks (fallback only):** for subjects with no usable image from source 1, files in the item's Commons category (P373, subcategories included) that carry a Quality, Featured or Valued mark, at most 10 per subject (`category_cap_reached` when there were more; the 10 are chosen by file title among the first 50 search hits). Searching a category is one request and Commons' search is the busiest backend (`cirrussearch-too-busy-error` is waited out, then the run stops and can be repeated), which is why this step is kept for the subjects that need it. Geosearch (files within 150 m) is not built yet; it waits until after B6.
+- **Each candidate** (`photo_candidates.jsonl`) keeps the file, its description page, size, type, SHA-1, the original URL and a thumbnail URL at 1280 px (a standard Commons width; other widths come from the original URL at publish time), the author as plain text (markup removed), the licence code, name and link Commons reports, an attribution line ("author, licence, via Wikimedia Commons"), the quality marks, the P18 rank and where it came from (`sources`). Nothing is dropped, rewritten or guessed.
+- **Licence allow-list** (`config/photo_rules.toml`, with the reason): CC0, public domain, CC BY and CC BY-SA 2.0 to 4.0 and the Free Art Licence. Others are flagged `licence_not_allowed`, a missing licence `licence_unknown`.
+- **Flags:** `multiple_p18`, `p18_after_facts`, `category_cap_reached`, `file_missing`, `licence_not_allowed`, `licence_unknown`, `no_author`, `no_thumb_url`, `not_an_image` (not JPEG, PNG or WebP), and on a subject without a row, `commons_category_unusable`. A candidate is **usable** only when it has none of the blocking flags (`file_missing`, `licence_*`, `no_author`, `no_thumb_url`, `not_an_image`). Flagged candidates are kept for review.
+- **Coverage** (`report.md`, `coverage_by_country.csv`): the share of destination rows and of see/do listings with at least one usable candidate, with the counts and denominators. Listings without a Wikidata item cannot have a candidate and count against coverage.
+- **Files:** `photo_candidates.jsonl`, `photo_candidates_by_country.csv`, `coverage_by_country.csv`, `flags_by_country.csv`, `licences.csv` (files per licence, allowed or not), `report.md` and `manifest.json` (input hashes, rules version, output hashes). A second run on the same day gives identical files.
+
 ## Known follow-ups
 
 Small items found in review of `fetch-listings`, not yet done:
@@ -113,7 +130,7 @@ Small items found in review of `fetch-listings`, not yet done:
 
 ## Progress lines
 
-Long jobs (`discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`) print a count-only line at most every 30 seconds and a final `done` line, such as `progress: Wikidata items 12500 of 111984 (11%)`, so a long run can be told from a hung one. A line holds only a fixed label and whole numbers, never a title, row text, address or the User-Agent, and goes to standard output next to the job's summary (standard error stays for errors). The helper is `catalogue/progress.py`.
+Long jobs (`discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates`) print a count-only line at most every 30 seconds and a final `done` line, such as `progress: Wikidata items 12500 of 111984 (11%)`, so a long run can be told from a hung one. A line holds only a fixed label and whole numbers, never a title, row text, address or the User-Agent, and goes to standard output next to the job's summary (standard error stays for errors). The helper is `catalogue/progress.py`.
 
 ## Politeness towards Wikimedia
 

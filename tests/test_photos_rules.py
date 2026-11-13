@@ -50,3 +50,11 @@ def test_not_toml_is_a_pipeline_error(tmp_path):
 
 def test_rules_are_a_value_object():
     assert isinstance(load_photo_rules(), PhotoRules)
+
+
+def test_a_file_with_no_licence_code_is_allowed_by_an_allowed_name_only():
+    rules = load_photo_rules()
+    assert rules.licence_name_allowed("FAL")
+    assert not rules.licence_name_allowed("GFDL")
+    assert not rules.licence_name_allowed("No restrictions")
+    assert not rules.licence_name_allowed("")

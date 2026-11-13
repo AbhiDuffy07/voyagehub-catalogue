@@ -19,6 +19,7 @@ PHOTO_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "p
 class PhotoRules:
     version: int
     licence_patterns: tuple[re.Pattern[str], ...]
+    licence_names: frozenset[str]
     mime_types: frozenset[str]
     thumb_width: int
     quality_categories: tuple[str, ...]
@@ -28,6 +29,10 @@ class PhotoRules:
     def licence_allowed(self, code: str) -> bool:
         lowered = code.strip().lower()
         return any(pattern.fullmatch(lowered) for pattern in self.licence_patterns)
+
+    def licence_name_allowed(self, name: str) -> bool:
+        """For a file with no licence code: is its short name on the allowed list (exact)?"""
+        return name.strip() in self.licence_names
 
 
 def _table(document: dict[str, Any], name: str, source: str) -> dict[str, Any]:
@@ -81,6 +86,7 @@ def load_photo_rules(path: Path = PHOTO_RULES_PATH) -> PhotoRules:
     return PhotoRules(
         version=version,
         licence_patterns=patterns,
+        licence_names=frozenset(_strings(licences, "allowed_names", source)),
         mime_types=frozenset(_strings(files, "mime_types", source)),
         thumb_width=_whole(files, "thumb_width", source),
         quality_categories=tuple(_strings(commons, "quality_categories", source)),

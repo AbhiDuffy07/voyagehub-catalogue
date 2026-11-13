@@ -14,6 +14,7 @@ Nothing is guessed: a value Commons does not give stays `None`. The author is st
 
 import html
 import re
+import time
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -31,6 +32,10 @@ SEARCH_LIMIT = 50
 MAX_CONTINUATIONS = 20
 MAX_REDIRECT_HOPS = 5
 DEFAULT_WORKERS = 3  # the polite client's own limit
+SEARCH_WORKERS = 1  # Commons search is the expensive backend: one search at a time
+BUSY_CODE = "cirrussearch-too-busy-error"
+BUSY_RETRIES = 5
+BUSY_FIRST_WAIT = 5.0  # doubled each time: 5, 10, 20, 40, 80 seconds
 _TAG = re.compile(r"<[^>]*>")
 _HIDDEN = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _SPACE = re.compile(r"\s+")
@@ -230,11 +235,30 @@ def fetch_file_info(
     return results
 
 
-def _search_one(client: PoliteClient, category: str, rules: PhotoRules) -> CategoryFiles:
+def _search_reply(
+    client: PoliteClient, params: dict[str, str | int], sleep: Callable[[float], None]
+) -> dict[str, Any]:
+    """One search, waiting out Commons' "search is too busy" answer (a few times, then stopping)."""
+    for attempt in range(BUSY_RETRIES + 1):
+        try:
+            return api_get(client, COMMONS_API, params)
+        except PipelineError as exc:
+            if BUSY_CODE not in str(exc):
+                raise
+            if attempt == BUSY_RETRIES:
+                raise PipelineError(
+                    "Commons search is too busy; try again later (nothing was kept)"
+                ) from None
+            sleep(BUSY_FIRST_WAIT * 2**attempt)
+    raise AssertionError("unreachable: the loop always returns or raises")  # pragma: no cover
+
+
+def _search_one(
+    client: PoliteClient, category: str, rules: PhotoRules, sleep: Callable[[float], None]
+) -> CategoryFiles:
     marks = "|".join(rules.quality_categories)
-    reply = api_get(
+    reply = _search_reply(
         client,
-        COMMONS_API,
         {
             "action": "query",
             "list": "search",
@@ -244,6 +268,7 @@ def _search_one(client: PoliteClient, category: str, rules: PhotoRules) -> Categ
             "srprop": "",
             "formatversion": 2,
         },
+        sleep,
     )
     try:
         query = reply["query"]
@@ -259,7 +284,11 @@ def _search_one(client: PoliteClient, category: str, rules: PhotoRules) -> Categ
 
 
 def search_marked_files(
-    client: PoliteClient, categories: Iterable[str], rules: PhotoRules
+    client: PoliteClient,
+    categories: Iterable[str],
+    rules: PhotoRules,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, CategoryFiles]:
     """Quality-marked files of each distinct category name (subcategories included), at most the
     rules' cap each, chosen by title order among the first search results."""
@@ -269,7 +298,10 @@ def search_marked_files(
     }
     todo = [name for name in names if name not in results]
     for name, found in _run_bounded(
-        todo, lambda n: _search_one(client, n, rules), "Commons categories"
+        todo,
+        lambda n: _search_one(client, n, rules, sleep),
+        "Commons categories",
+        workers=SEARCH_WORKERS,
     ):
         results[name] = found
     return results

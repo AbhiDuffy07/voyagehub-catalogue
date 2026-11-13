@@ -178,3 +178,38 @@ def test_titles_that_would_split_the_request_are_never_asked_for(client):
     result = fetch_file_info(client, ["File:Ok.jpg", "File:A|B.jpg", "  "], RULES)
     assert seen == [["File:Ok.jpg"]]
     assert result["File:A|B.jpg"].status == "missing" and result["  "].status == "missing"
+
+
+def _busy():
+    return httpx.Response(200, json={"error": {"code": "cirrussearch-too-busy-error", "info": "x"}})
+
+
+@respx.mock
+def test_a_busy_search_backend_is_waited_out_and_retried(client):
+    waits = []
+    ok = httpx.Response(
+        200, json={"query": {"searchinfo": {"totalhits": 1}, "search": [{"title": "File:X.jpg"}]}}
+    )
+    respx.get(COMMONS).mock(side_effect=[_busy(), _busy(), ok])
+    found = search_marked_files(client, ["A"], RULES, sleep=waits.append)
+    assert found["A"].files == ("File:X.jpg",)
+    assert waits == [5.0, 10.0]
+
+
+@respx.mock
+def test_a_search_backend_that_stays_busy_stops_the_run_with_a_clear_message(client):
+    waits = []
+    respx.get(COMMONS).mock(side_effect=lambda request: _busy())
+    with pytest.raises(PipelineError, match="too busy"):
+        search_marked_files(client, ["A"], RULES, sleep=waits.append)
+    assert len(waits) == 5
+    assert "info" not in str(waits)
+
+
+@respx.mock
+def test_other_search_errors_are_not_retried(client):
+    respx.get(COMMONS).mock(
+        return_value=httpx.Response(200, json={"error": {"code": "badvalue", "info": "x"}})
+    )
+    with pytest.raises(PipelineError, match="badvalue"):
+        search_marked_files(client, ["A"], RULES, sleep=lambda s: None)

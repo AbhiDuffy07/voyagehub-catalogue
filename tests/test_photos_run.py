@@ -202,14 +202,34 @@ def test_category_cap_keeps_ten_marked_files_and_flags_the_cap(client, folders, 
 
 @respx.mock
 def test_a_file_in_both_sources_is_one_row_with_both(client, folders, tmp_path):
+    # The item's own image is unusable (non-commercial), so the category is searched, and it
+    # lists the same file: one row, both sources.
     claims = {
         **CLAIMS,
         "Q3": {"P18": [string_claim("Delhi 1.jpg")], "P373": [string_claim("Delhi")]},
     }
-    mock(claims=claims)
+    mock(files={**FILES, "File:Delhi 1.jpg": commons_file(marks=MARKED, **NC)}, claims=claims)
     delhi = pick(rows_of(run(client, folders, tmp_path)), 3)
     assert delhi["Delhi 1.jpg"]["sources"] == ["commons_category", "wikidata_p18"]
-    assert delhi["Delhi 1.jpg"]["flags"] == ["p18_after_facts"]
+    assert delhi["Delhi 1.jpg"]["flags"] == ["licence_not_allowed", "p18_after_facts"]
+    assert delhi["Delhi 2.jpg"]["sources"] == ["commons_category"]
+
+
+@respx.mock
+def test_category_is_only_searched_when_there_is_no_usable_image_yet(client, folders, tmp_path):
+    claims = {
+        **CLAIMS,
+        "Q1": {"P18": [string_claim("Jaipur.jpg")], "P373": [string_claim("Jaipur")]},
+        "Q10": {"P18": [string_claim("Amer.jpg")], "P373": [string_claim("Amer Fort")]},
+    }
+    search_seen = []
+    mock(claims=claims, search_seen=search_seen, categories={"Delhi": ["File:Delhi 1.jpg"]})
+    result = run(client, folders, tmp_path)
+    searched = [q.split('deepcat:"', 1)[1].split('"', 1)[0] for q in search_seen]
+    # Jaipur has a usable image: skipped. Amer's is non-commercial: its category is searched.
+    assert sorted(searched) == ["Amer Fort", "Delhi"]
+    assert result.totals["categories_searched"] == 2
+    assert "Jaipur" not in searched
 
 
 @respx.mock
@@ -326,3 +346,20 @@ def test_missing_listings_folder_names_the_job_to_run(client, folders, tmp_path)
     (listings / "manifest.json").unlink()
     with pytest.raises(PipelineError, match="run fetch-listings"):
         run(client, folders, tmp_path)
+
+
+@respx.mock
+def test_fal_has_no_code_on_commons_but_is_allowed_by_name(client, folders, tmp_path):
+    fal = commons_file(licence=None, licence_name="FAL", licence_url=None)
+    mock(files={**FILES, "File:Pune.jpg": fal})
+    pune = pick(rows_of(run(client, folders, tmp_path)), 5)["Pune.jpg"]
+    assert pune["flags"] == ["p18_after_facts"] and pune["usable"] is True
+    assert pune["licence_code"] is None and pune["licence_name"] == "FAL"
+
+
+@respx.mock
+def test_an_unlisted_licence_name_without_a_code_stays_unknown(client, folders, tmp_path):
+    odd = commons_file(licence=None, licence_name="No restrictions")
+    mock(files={**FILES, "File:Pune.jpg": odd})
+    pune = pick(rows_of(run(client, folders, tmp_path)), 5)["Pune.jpg"]
+    assert "licence_unknown" in pune["flags"] and pune["usable"] is False
