@@ -169,3 +169,40 @@ def iter_listings(listings_folder: Path) -> Iterator[ListingIn]:
             )
         except KeyError:
             raise PipelineError("listings.jsonl has a damaged row") from None
+
+
+def verify_enrich_output(
+    folder: Path, country_filter: str | None, names: tuple[str, ...]
+) -> tuple[str, dict[str, str]]:
+    """Check an `enrich-wikidata` output folder belongs to this run: its manifest must exist, name
+    the same country filter and carry the SHA-256 of each file in `names`. Returns the manifest's
+    own hash and the input hashes, for the next job's manifest."""
+    manifest_path = folder / "manifest.json"
+    if not manifest_path.is_file():
+        raise PipelineError(f"manifest.json not found in {folder}; run enrich-wikidata first")
+    damaged = "the enrich-wikidata manifest.json is damaged; run enrich-wikidata again"
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes)
+        recorded_country = manifest["country_filter"]
+        recorded = manifest["outputs_sha256"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise PipelineError(damaged) from None
+    if not isinstance(recorded, dict):
+        raise PipelineError(damaged)
+    if recorded_country != country_filter:
+        raise PipelineError(
+            "enrich-wikidata was run for a different country filter; use the same --country"
+        )
+    hashes: dict[str, str] = {}
+    for name in names:
+        path = folder / name
+        if not path.is_file():
+            raise PipelineError(f"{name} not found in {folder}")
+        try:
+            hashes[name] = _sha256(path)
+        except OSError:
+            raise PipelineError(f"{name} could not be read") from None
+        if hashes[name] != recorded.get(name):
+            raise PipelineError(f"{name} does not match the enrich-wikidata manifest")
+    return hashlib.sha256(manifest_bytes).hexdigest(), hashes
