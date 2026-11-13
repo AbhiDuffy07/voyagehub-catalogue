@@ -1,0 +1,44 @@
+# Rules for photo-select (B6): which photo candidate becomes a subject's main photo. Only B5's usable
+# candidates are considered. Nothing here is country-specific. Change a value only together with its
+# reason, and bump rules_version (rows carry `approved_by = "auto:<rules_version>"`).
+
+rules_version = 1
+
+[drop]
+# A candidate whose file name contains any of these whole words (case-insensitive, `_` read as a
+# space) is dropped. Measured on the India candidates: 20 of 4,411 usable file names hit this list.
+name_words = [
+  "map", "maps", "locator", "flag", "flags", "logo", "logos", "coat of arms", "emblem",
+  "seal", "diagram", "banner", "chart", "schematic",
+]
+mime_types = ["image/jpeg", "image/png", "image/webp"]
+max_aspect = 2.5
+reason = """Maps, flags, logos, coats of arms, diagrams and banners are not photographs of the \\
+place; SVG and other types are not photographs either. A false positive (for example "flag \\
+ceremony") only costs one candidate: the next one is chosen, or the subject is flagged. Panoramas \\
+wider than 2.5:1 do not fit a card and are dropped (design section 5)."""
+
+[gate]
+min_long_side = 1024
+hero_long_side = 2000
+reason = """Owner ruling 2026-11-13: the long side must be at least 1,024 px; portrait is allowed \\
+(the cards are tall and the app crops). A hero-quality photo has a long side of at least 2,000 px \\
+(design section 5; the readiness rule counts them). A candidate below the minimum is never chosen \\
+even when it is the only one: the subject is flagged and the app shows the city photo."""
+
+[tiers]
+# Order of choice: Wikidata P18 (preferred rank first), then these, then everything else (tier 5,
+# empty until geosearch exists). A P18 file that is also Featured stays in the P18 tier.
+featured = ["Featured pictures on Wikimedia Commons"]
+quality = ["Quality images"]
+valued = ["Valued images sorted by promotion date", "Valued images"]
+
+[score]
+# Ranks candidates inside a tier: size (weighted double), closeness to 3:2, and a bonus for
+# landscape, so landscape and 3:2 outrank portrait at equal size, while a much bigger portrait
+# can still win.
+size_cap = 4000
+size_weight = 2.0
+target_ratio = 1.5
+shape_weight = 1.0
+landscape_bonus = 0.25

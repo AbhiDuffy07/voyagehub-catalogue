@@ -1,8 +1,8 @@
 """Command line: `python -m catalogue <command>`.
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
-enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5; the rest
-arrive one by one in later sessions).
+enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
+in B6; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -28,6 +28,7 @@ from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
 from catalogue.photos.run import run_photo_candidates
+from catalogue.photos.select_run import run_photo_select
 from catalogue.settings import Settings, SettingsError, load_settings
 
 SITEINFO_URL = "https://en.wikivoyage.org/w/api.php"
@@ -138,6 +139,22 @@ def _parser() -> argparse.ArgumentParser:
         "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
     )
     photos.add_argument("--out-dir", type=Path, default=Path("out/photos"))
+
+    selection = commands.add_parser(
+        "photo-select",
+        help="choose one main photo per subject from the photo-candidates output (offline)",
+    )
+    selection.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    selection.add_argument(
+        "--country", help="only this ISO country code (same as photo-candidates)"
+    )
+    selection.add_argument(
+        "--photos-dir", type=Path, default=Path("out/photos"), help="where photo-candidates wrote"
+    )
+    selection.add_argument(
+        "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
+    )
+    selection.add_argument("--out-dir", type=Path, default=Path("out/photo_selection"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -336,6 +353,20 @@ def _photo_candidates(
     print(f"files: {result.output_dir}")
 
 
+def _photo_select(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    result = run_photo_select(
+        photos_folder=args.photos_dir / folder,
+        enrich_folder=args.enrich_dir / folder,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+    )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -410,6 +441,8 @@ def main(
             _enrich_wikidata(args, environ, env_file, client_factory)
         elif args.command == "wikipedia-summary":
             _wikipedia_summary(args, environ, env_file, client_factory)
+        elif args.command == "photo-select":
+            _photo_select(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
         else:
