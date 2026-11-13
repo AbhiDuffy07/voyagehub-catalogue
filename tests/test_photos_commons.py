@@ -5,6 +5,9 @@ import respx
 from catalogue.errors import PipelineError
 from catalogue.photos.commons import (
     BATCH_SIZE,
+    BUSY_GIVE_UP,
+    BUSY_RETRIES,
+    MAX_URL_CHARS,
     fetch_file_info,
     search_marked_files,
     strip_html,
@@ -198,13 +201,47 @@ def test_a_busy_search_backend_is_waited_out_and_retried(client):
 
 
 @respx.mock
-def test_a_search_backend_that_stays_busy_stops_the_run_with_a_clear_message(client):
+def test_a_search_that_stays_busy_is_flagged_busy_and_the_others_still_run(client):
     waits = []
-    respx.get(COMMONS).mock(side_effect=lambda request: _busy())
-    with pytest.raises(PipelineError, match="too busy"):
-        search_marked_files(client, ["A"], RULES, sleep=waits.append)
-    assert len(waits) == 5
-    assert "info" not in str(waits)
+    ok = httpx.Response(
+        200, json={"query": {"searchinfo": {"totalhits": 1}, "search": [{"title": "File:X.jpg"}]}}
+    )
+    # "A" stays busy through all its retries; "B" answers normally.
+    answers = {"A": [_busy()] * (BUSY_RETRIES + 1), "B": [ok]}
+
+    def answer(request):
+        name = request.url.params["srsearch"].split('deepcat:"', 1)[1].split('"', 1)[0]
+        return answers[name].pop(0)
+
+    respx.get(COMMONS).mock(side_effect=answer)
+    found = search_marked_files(client, ["A", "B"], RULES, sleep=waits.append)
+    assert found["A"].busy is True and found["A"].files == ()
+    assert found["B"].busy is False and found["B"].files == ("File:X.jpg",)
+    assert len(waits) == BUSY_RETRIES
+
+
+@respx.mock
+def test_after_three_busy_categories_in_a_row_the_rest_are_flagged_without_asking(client):
+    calls = []
+
+    def answer(request):
+        calls.append(1)
+        return _busy()
+
+    respx.get(COMMONS).mock(side_effect=answer)
+    names = [f"C{n}" for n in range(6)]
+    found = search_marked_files(client, names, RULES, sleep=lambda s: None)
+    assert all(found[n].busy for n in names)
+    assert len(calls) == BUSY_GIVE_UP * (BUSY_RETRIES + 1)  # nothing is asked after giving up
+
+
+@respx.mock
+def test_a_good_answer_resets_the_busy_streak(client):
+    ok = httpx.Response(200, json={"query": {"searchinfo": {"totalhits": 0}, "search": []}})
+    script = iter([_busy()] * (BUSY_RETRIES + 1) * 2 + [ok] + [_busy()] * (BUSY_RETRIES + 1) + [ok])
+    respx.get(COMMONS).mock(side_effect=lambda request: next(script))
+    found = search_marked_files(client, ["A", "B", "C", "D", "E"], RULES, sleep=lambda s: None)
+    assert [found[n].busy for n in "ABCDE"] == [True, True, False, True, False]
 
 
 @respx.mock
@@ -221,3 +258,68 @@ def test_thumbnail_width_is_what_commons_returned_not_what_was_asked(client):
     small = commons_file(width=800, height=600)
     respx.get(COMMONS).mock(side_effect=fake_commons({"File:Small.jpg": small}))
     assert fetch_file_info(client, ["File:Small.jpg"], RULES)["File:Small.jpg"].thumb_width == 800
+
+
+@respx.mock
+def test_the_search_query_is_an_or_over_every_quality_category(client):
+    queries = []
+    respx.get(COMMONS).mock(
+        side_effect=fake_commons(categories={"Amer Fort": []}, search_seen=queries)
+    )
+    search_marked_files(client, ["Amer Fort"], RULES)
+    marks = (
+        "Quality images|Featured pictures on Wikimedia Commons|"
+        "Valued images sorted by promotion date|Valued images"
+    )
+    assert queries == [f'deepcat:"Amer Fort" incategory:"{marks}"']
+
+
+def test_the_committed_quality_categories_are_the_verified_commons_names():
+    # Checked live with prop=categoryinfo (2026-11-13): 473,338 / 22,762 / 56,492 / 2,277 files.
+    # "Featured pictures" itself holds 0 files (a navigation category) and must not be used.
+    assert RULES.quality_categories == (
+        "Quality images",
+        "Featured pictures on Wikimedia Commons",
+        "Valued images sorted by promotion date",
+        "Valued images",
+    )
+
+
+LONG_NON_LATIN = [
+    f"File:{chr(0x0905 + n % 30) * 40}{n:02d}{chr(0x4E00 + n) * 30}.jpg" for n in range(BATCH_SIZE)
+]
+
+
+def test_the_long_non_latin_titles_really_would_overflow_one_url():
+    from urllib.parse import quote
+
+    assert len(LONG_NON_LATIN) == 50
+    assert len(quote("|".join(LONG_NON_LATIN))) > 8000  # the case the batching must handle
+
+
+@respx.mock
+def test_long_non_latin_titles_are_split_so_no_url_is_too_long(client):
+    lengths, seen = [], []
+    inner = fake_commons({t: commons_file() for t in LONG_NON_LATIN}, seen=seen)
+
+    def answer(request):
+        lengths.append(len(str(request.url)))
+        return inner(request)
+
+    respx.get(COMMONS).mock(side_effect=answer)
+    result = fetch_file_info(client, LONG_NON_LATIN, RULES)
+    assert len(lengths) > 1 and max(lengths) < MAX_URL_CHARS
+    assert sorted(t for batch in seen for t in batch) == sorted(LONG_NON_LATIN)  # none lost
+    assert all(len(batch) <= BATCH_SIZE for batch in seen)
+    assert all(result[t].status == "ok" for t in LONG_NON_LATIN)
+
+
+@respx.mock
+def test_short_titles_still_travel_fifty_to_a_request(client):
+    seen = []
+    titles = [f"File:Short {n:03d}.jpg" for n in range(50)]
+    respx.get(COMMONS).mock(
+        side_effect=fake_commons({t: commons_file() for t in titles}, seen=seen)
+    )
+    fetch_file_info(client, titles, RULES)
+    assert [len(b) for b in seen] == [50]

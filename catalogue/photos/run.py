@@ -24,8 +24,9 @@ one usable candidate) is in the report; listings with no Wikidata item count aga
 
 import hashlib
 import json
+import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -112,6 +113,8 @@ class PhotoResult:
                 f"coverage {subject}: {entry['with_usable']} of {entry['total']} "
                 f"({_percent(entry['with_usable'], entry['total'])}%)"
             )
+        if totals["categories_busy"]:
+            lines.append(f"categories busy (not searched): {totals['categories_busy']}")
         if totals["flags"]:
             lines.append(", ".join(f"{k} {v}" for k, v in totals["flags"].items()))
         return "\n".join(lines)
@@ -232,6 +235,9 @@ def _add_category_candidates(
 ) -> None:
     if entry.unusable:
         subject_flags.add("commons_category_unusable")
+        return
+    if entry.busy:
+        subject_flags.add("category_search_busy")
         return
     for title in entry.files:
         if title.startswith("File:"):
@@ -356,6 +362,9 @@ def _report(totals: Mapping[str, Any], dump_date: str, rules: PhotoRules) -> str
         f"distinct Commons files: {totals['files']}",
         f"- Commons categories searched (subjects with no usable image of their own): "
         f"{totals['categories_searched']}",
+        f"- categories busy: {totals['categories_busy']} (Commons search was too busy, so these "
+        "were not searched and their subjects are flagged `category_search_busy`; run again to "
+        "fill them)",
         f"- rules version: {rules.version}",
         "",
         "## Coverage: subjects with at least one usable candidate",
@@ -401,6 +410,7 @@ def run_photo_candidates(
     today: date,
     country_iso: str | None = None,
     rules: PhotoRules | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> PhotoResult:
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_photo_rules()
@@ -427,7 +437,7 @@ def run_photo_candidates(
         and media.commons_category
         and not any(_is_usable(c, infos[t], rules) for t, c in gathered[s][0].items())
     }
-    categories = search_marked_files(client, set(fallback.values()), rules)
+    categories = search_marked_files(client, set(fallback.values()), rules, sleep=sleep)
     for s, category in fallback.items():
         _add_category_candidates(gathered[s][0], gathered[s][1], categories[category])
     infos.update(
@@ -548,6 +558,7 @@ def run_photo_candidates(
         "usable": usable_rows,
         "files": len(titles),
         "categories_searched": len(set(fallback.values())),
+        "categories_busy": sum(categories[c].busy for c in set(fallback.values())),
         "flags": dict(sorted(flag_counts.items())),
         "sources": dict(sorted(sources.items())),
         "coverage": coverage,

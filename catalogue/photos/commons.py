@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from urllib.parse import quote
 
 from catalogue.enrich.api import api_get
 from catalogue.errors import PipelineError
@@ -36,6 +37,12 @@ SEARCH_WORKERS = 1  # Commons search is the expensive backend: one search at a t
 BUSY_CODE = "cirrussearch-too-busy-error"
 BUSY_RETRIES = 5
 BUSY_FIRST_WAIT = 5.0  # doubled each time: 5, 10, 20, 40, 80 seconds
+BUSY_GIVE_UP = 3  # this many categories in a row busy: stop asking, flag the rest
+# A GET URL much over 8 KB is refused by the servers in front of the API. Titles are sent
+# percent-encoded (a Devanagari or CJK letter is 9 characters), so a batch is also limited
+# by the encoded length of its titles, which leaves room for the other parameters.
+MAX_URL_CHARS = 8000
+MAX_TITLES_CHARS = 6000
 _TAG = re.compile(r"<[^>]*>")
 _HIDDEN = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _SPACE = re.compile(r"\s+")
@@ -70,6 +77,7 @@ class CategoryFiles:
     files: tuple[str, ...] = ()  # at most the cap, sorted by title
     capped: bool = False  # the search found more than the cap
     unusable: bool = False  # the category name cannot be searched safely
+    busy: bool = False  # Commons search stayed busy: not searched, so not empty
 
 
 def strip_html(value: object) -> str | None:
@@ -115,6 +123,26 @@ def _run_bounded(
                 future.cancel()
             raise
     progress.done()
+
+
+class SearchBusyError(PipelineError):
+    """Commons search answered "too busy" on every retry."""
+
+
+def _batches(titles: list[str]) -> Iterator[list[str]]:
+    """Batches of at most BATCH_SIZE titles whose percent-encoded, pipe-joined length stays under
+    MAX_TITLES_CHARS (a title longer than that on its own still goes alone)."""
+    batch: list[str] = []
+    size = 0
+    for title in titles:
+        cost = len(quote(title, safe="")) + 3  # the encoded "|" between titles
+        if batch and (len(batch) >= BATCH_SIZE or size + cost > MAX_TITLES_CHARS):
+            yield batch
+            batch, size = [], 0
+        batch.append(title)
+        size += cost
+    if batch:
+        yield batch
 
 
 def _meta(extmetadata: dict[str, Any], key: str) -> str | None:
@@ -228,7 +256,7 @@ def fetch_file_info(
         t: FileInfo("missing", t) for t in distinct if _UNSAFE_TITLE.search(t) or not t.strip()
     }
     ordered = sorted(t for t in distinct if t not in results)
-    batches = [ordered[i : i + BATCH_SIZE] for i in range(0, len(ordered), BATCH_SIZE)]
+    batches = list(_batches(ordered))
     for batch, read in _run_bounded(
         batches, lambda b: _read_batch(client, b, rules), "Commons files"
     ):
@@ -248,9 +276,7 @@ def _search_reply(
             if BUSY_CODE not in str(exc):
                 raise
             if attempt == BUSY_RETRIES:
-                raise PipelineError(
-                    "Commons search is too busy; try again later (nothing was kept)"
-                ) from None
+                raise SearchBusyError("Commons search stayed too busy") from None
             sleep(BUSY_FIRST_WAIT * 2**attempt)
     raise AssertionError("unreachable: the loop always returns or raises")  # pragma: no cover
 
@@ -299,11 +325,20 @@ def search_marked_files(
         name: CategoryFiles(unusable=True) for name in names if _UNSAFE_CATEGORY.search(name)
     }
     todo = [name for name in names if name not in results]
-    for name, found in _run_bounded(
-        todo,
-        lambda n: _search_one(client, n, rules, sleep),
-        "Commons categories",
-        workers=SEARCH_WORKERS,
-    ):
+    streak = 0  # categories in a row that stayed busy (searches run one at a time)
+
+    def work(name: str) -> CategoryFiles:
+        nonlocal streak
+        if streak >= BUSY_GIVE_UP:
+            return CategoryFiles(busy=True)  # Commons search is down: stop asking
+        try:
+            found = _search_one(client, name, rules, sleep)
+        except SearchBusyError:
+            streak += 1
+            return CategoryFiles(busy=True)
+        streak = 0
+        return found
+
+    for name, found in _run_bounded(todo, work, "Commons categories", workers=SEARCH_WORKERS):
         results[name] = found
     return results

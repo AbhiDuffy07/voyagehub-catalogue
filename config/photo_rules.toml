@@ -32,9 +32,18 @@ thumb_reason = """Hotlinked thumbnail width, one of Commons' standard steps (the
 policy asks for standard sizes). 1280 px is the long-side minimum B6 expects for non-hero photos."""
 
 [commons]
+# Checked live with prop=categoryinfo on 2026-11-13 (files directly in each category):
+#   Quality images                          473,338
+#   Featured pictures on Wikimedia Commons   22,762
+#   Valued images sorted by promotion date   56,492
+#   Valued images                             2,277
+# "Featured pictures" itself holds 0 files (a navigation category) and must not be used. The
+# first version of this file listed only "Valued images", which misses all but 2,277 of the
+# 58,000-odd valued images.
 quality_categories = [
   "Quality images",
   "Featured pictures on Wikimedia Commons",
+  "Valued images sorted by promotion date",
   "Valued images",
 ]
 category_cap = 10

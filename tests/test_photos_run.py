@@ -3,6 +3,7 @@ import hashlib
 import json
 from datetime import date
 
+import httpx
 import pytest
 import respx
 
@@ -400,3 +401,25 @@ def test_requests_that_reach_one_file_become_one_candidate():
     assert candidate.sources == {"wikidata_p18", "commons_category"}
     assert candidate.flags == {"multiple_p18", "category_cap_reached"}
     assert candidate.rank == "preferred"
+
+
+@respx.mock
+def test_a_busy_category_search_flags_the_subject_and_the_run_still_finishes(
+    client, folders, tmp_path
+):
+    respx.get(WD).mock(side_effect=fake_wikidata(CLAIMS))
+    respx.get(COMMONS).mock(
+        side_effect=lambda request: (
+            httpx.Response(200, json={"error": {"code": "cirrussearch-too-busy-error"}})
+            if request.url.params.get("list") == "search"
+            else fake_commons(FILES)(request)
+        )
+    )
+    result = run(client, folders, tmp_path, sleep=lambda s: None)
+    rows = rows_of(result)
+    assert pick(rows, 3) == {}  # Delhi's category could not be searched
+    assert pick(rows, 1)["Jaipur.jpg"]["usable"] is True  # earlier work is kept
+    assert result.totals["flags"]["category_search_busy"] == 1
+    assert result.totals["categories_busy"] == 1
+    assert "category_search_busy 1" in result.summary()
+    assert "categories busy: 1" in (result.output_dir / "report.md").read_text("utf-8")
