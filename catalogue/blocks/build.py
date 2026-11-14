@@ -12,6 +12,7 @@ otherwise reported, never given a one-stop block. Every stop is used at most onc
 
 import statistics
 from dataclasses import dataclass, field
+from typing import Any
 
 from catalogue.blocks.areas import priority_key
 from catalogue.blocks.geo import haversine_km, road_minutes, walk_km, walk_minutes
@@ -377,16 +378,27 @@ def draft_blocks(stops: list[Stop], areas: list[Area], rules: BlockRules) -> Blo
     return result
 
 
-def days_fillable(blocks: list[Block]) -> int:
-    """Whole days the blocks can fill with no stop repeated. A day is a morning block plus an
-    afternoon block, or one full-day block. A block whose slot only came from alternating (its
-    kind says nothing) can be either half."""
-    full = sum(1 for b in blocks if b.slot == "full_day")
+def pair_days(blocks: list[Any]) -> list[list[Any]]:
+    """The whole days the blocks can fill, each a list of blocks with no block used twice. A day is
+    a morning block plus an afternoon block, or one full-day block. A block whose slot only came
+    from alternating (its kind says nothing) can be either half."""
+    days = [[b] for b in blocks if b.slot == "full_day"]
     halves = [b for b in blocks if b.slot != "full_day"]
-    flexible = sum(1 for b in halves if b.slot_basis == "alternate")
-    morning = sum(1 for b in halves if b.slot_basis != "alternate" and b.slot == "morning")
-    afternoon = sum(1 for b in halves if b.slot_basis != "alternate" and b.slot == "afternoon")
-    paired = min(morning, afternoon)
-    spare = max(morning, afternoon) - paired
-    used = min(flexible, spare)
-    return full + paired + used + (flexible - used) // 2
+    flexible = [b for b in halves if b.slot_basis == "alternate"]
+    morning = [b for b in halves if b.slot_basis != "alternate" and b.slot == "morning"]
+    afternoon = [b for b in halves if b.slot_basis != "alternate" and b.slot == "afternoon"]
+    paired = min(len(morning), len(afternoon))
+    days += [[morning[i], afternoon[i]] for i in range(paired)]
+    spare_morning = morning[paired:]
+    spare_afternoon = afternoon[paired:]
+    used = min(len(flexible), len(spare_morning) + len(spare_afternoon))
+    days += [[m, flexible[i]] for i, m in enumerate(spare_morning[:used])]
+    days += [[flexible[i], a] for i, a in enumerate(spare_afternoon[:used])]
+    rest = flexible[used:]
+    days += [[rest[i], rest[i + 1]] for i in range(0, len(rest) - 1, 2)]
+    return days
+
+
+def days_fillable(blocks: list[Any]) -> int:
+    """How many whole days the blocks can fill (see `pair_days`)."""
+    return len(pair_days(blocks))

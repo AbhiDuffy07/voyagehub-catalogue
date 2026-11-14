@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and nine jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates`, `photo-select`, `draft-blocks` and `auto-check`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and ten jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates`, `photo-select`, `draft-blocks`, `auto-check` and `price-bands`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -167,6 +167,20 @@ Offline and fast (seconds): no network, no settings. It reads `out/blocks/<dump 
 - **Non-sight stops:** a stop is a non-sight only when its kind is not a sight kind (unknown kind, or neighbourhood), it is not a UNESCO site, its name has none of the sight words (temple, church, museum, fort, ghat, ...), and its name has a whole-word non-sight word (stadium, institute, university, college, school, office, hospital, cinema, theatre, auditorium, golf, club, race course, court, secretariat, factory, hostel, sports, headquarters, bus stand, municipal corporation). The matched word is reported. A block with non-sight stops but at least the minimum number of sights (2) left is `flagged` (`non_sight_stop`); a block left with fewer is `rejected` (`non_sight_stops`). Plurals count (-s, -es, -ies), a space in a word also matches a hyphen, and `memorial` is not a sight word (it names hospitals and stadiums too).
 - **Left off the list on purpose** (they name sights as often as offices): bhavan, centre, complex, research, bank, mall, academy. A wrong flag costs a held-back block, not lost data.
 - **Report and files:** `block_checks.jsonl` (one row per block: status, reasons, flagged stops), `city_summary.csv` and `report.md` (per city: blocks by status and **the days the checked blocks can fill** next to the days all draft blocks could fill; totals by reason and by matched word; blocks with no known hours or no photo, for information only), `flagged_sample.md` (a seeded sample of 10 flagged and 10 rejected blocks for the author's own review) and `manifest.json`. A rerun gives identical files.
+
+### `price-bands`
+
+```
+.venv\Scripts\python -m catalogue price-bands --dump-date 20261101 --country IN
+```
+
+Offline and fast (seconds): no network, no settings. It reads `out/listings/`, `out/blocks/` and `out/block_checks/` (each hash-checked against its manifest and country filter) and writes `out/prices/<dump date>[-CC]/`. Rules and reasons: `config/price_rules.toml` (rows carry `price_rules_version`).
+
+- **Exact prices:** a price is shown exactly only when its text was fully read **and** the listing was last edited within two years of the dump (the same cutoff as the freshness report). It keeps its visitor tiers (`resident`, `foreigner`, `adult`), the verbatim text, the edit date, and the source, licence and attribution. A price worded "from" or "about", a text with several price lists (two different amounts for one visitor type, or an amount with no visitor type next to resident/foreigner prices), a partial read, or a price in another currency than the city's is never shown as an exact figure.
+- **Approximate bands:** older or undated prices (and the unclear ones above) only feed a per-city band per kind (see, do, eat, drink, sleep), currency and visitor group: the median, with the 25th to 75th percentile as the range. Fresh prices alone make the band when there are at least 3, otherwise fresh and older are pooled. Fewer than 3 prices give no band. Each band carries the counts (fresh, older, undated) and the oldest and newest edit date. A free price counts as zero. Nothing is converted between currencies.
+- **Cost estimate per block and per day, for `resident` and `foreigner`:** each stop is its exact price, else the city band for its kind (marked approximate), else unknown: **"Check on official site", never zero**. Food is one meal per half-day block (two for a day trip) at the city's eat band, only where that band exists. Local transport is **not included**: there is no fare data (B8's travel times are estimates, not fares). Every figure is labelled `estimate` with a `basis` text; `stop_basis` says per stop where its fee came from, and `complete` is false when any stop is unknown, so a partial total is never read as a whole one. Days come from checked blocks only, paired as in `draft-blocks` (`pair_days`).
+- **Files:** `listing_prices.jsonl`, `city_price_bands.jsonl`, `block_costs.jsonl`, `day_costs.jsonl`, `report.md`, `cost_sample.md` (a seeded sample of 20 blocks for the author's own review) and `manifest.json`. A rerun gives identical files.
+- **Not done:** an official fee override (ASI first): ASI publishes rates on per-monument pages with online and cash rates that differ, and some pages contradict each other, so there is no single reliable source to read quickly; to do when one is found.
 
 ## Known follow-ups
 

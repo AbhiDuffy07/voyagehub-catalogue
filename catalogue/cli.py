@@ -2,7 +2,8 @@
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
 enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
-in B6, draft-blocks in B8, auto-check in B10; the rest arrive one by one in later sessions).
+in B6, draft-blocks in B8, auto-check in B10, price-bands in B11; the rest arrive one by one in
+later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -31,6 +32,7 @@ from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
 from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
+from catalogue.prices.run import run_price_bands
 from catalogue.settings import Settings, SettingsError, load_settings
 
 SITEINFO_URL = "https://en.wikivoyage.org/w/api.php"
@@ -200,6 +202,23 @@ def _parser() -> argparse.ArgumentParser:
         "--blocks-dir", type=Path, default=Path("out/blocks"), help="where draft-blocks wrote"
     )
     checks.add_argument("--out-dir", type=Path, default=Path("out/block_checks"))
+
+    prices = commands.add_parser(
+        "price-bands",
+        help="exact prices, per-city approximate price bands and cost estimates (offline)",
+    )
+    prices.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    prices.add_argument("--country", help="only this ISO country code (same as draft-blocks)")
+    prices.add_argument(
+        "--listings-dir", type=Path, default=Path("out/listings"), help="where fetch-listings wrote"
+    )
+    prices.add_argument(
+        "--blocks-dir", type=Path, default=Path("out/blocks"), help="where draft-blocks wrote"
+    )
+    prices.add_argument(
+        "--checks-dir", type=Path, default=Path("out/block_checks"), help="where auto-check wrote"
+    )
+    prices.add_argument("--out-dir", type=Path, default=Path("out/prices"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -442,6 +461,21 @@ def _auto_check(args: argparse.Namespace) -> None:
     print(f"files: {result.output_dir}")
 
 
+def _price_bands(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    result = run_price_bands(
+        listings_folder=args.listings_dir / folder,
+        blocks_folder=args.blocks_dir / folder,
+        checks_folder=args.checks_dir / folder,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+    )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -522,6 +556,8 @@ def main(
             _draft_blocks(args)
         elif args.command == "auto-check":
             _auto_check(args)
+        elif args.command == "price-bands":
+            _price_bands(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
         else:

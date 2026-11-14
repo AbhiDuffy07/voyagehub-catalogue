@@ -1,0 +1,30 @@
+# Rules for price-bands (B11): exact prices, per-city approximate bands and cost estimates.
+# Nothing here is country-specific. Change a value only together with its reason, and bump
+# price_rules_version.
+
+price_rules_version = 1
+
+# Freshness is not set here: a price is shown exactly only when the listing was last edited within
+# two years of the dump (`FRESH_YEARS` in catalogue/listings/lastedit.py, the same cutoff as B3's
+# report). Older or undated prices never show as a figure; they only feed the per-city bands.
+
+[units]
+# Which price units count as "one visitor, one visit". An amount with no unit always counts.
+# Anything else ("for 2", "per room", "per hour", "per day") is left out, not guessed.
+person = ["per person", "per head"]
+# Hotels are priced per night.
+sleep = ["per night"]
+
+[bands]
+# Kinds that get a band (a listing's own section, not its Wikidata kind).
+kinds = ["see", "do", "eat", "drink", "sleep"]
+# Fewer prices than this and no band is published: "Check on official site".
+min_prices = 3
+# The range shown is the middle of the spread (these percentiles); the figure is the median.
+low_percentile = 25
+high_percentile = 75
+
+[meals]
+# Meals added to a block's food estimate, at the city's eat band. A day trip is a full-day block.
+half_day = 1
+full_day = 2
