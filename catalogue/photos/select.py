@@ -142,7 +142,7 @@ def load_rejected_files(path: Path = REJECTED_PATH) -> frozenset[str]:
         return frozenset()
     lines = [
         line
-        for line in path.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8-sig").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
     reader = csv.DictReader(lines)
@@ -150,6 +150,11 @@ def load_rejected_files(path: Path = REJECTED_PATH) -> frozenset[str]:
         raise PipelineError("rejected_photos.csv needs the columns commons_file, reason")
     found: set[str] = set()
     for row in reader:
+        if row.get(None) or row["reason"] is None:
+            raise PipelineError(
+                "rejected_photos.csv: a line has the wrong number of columns "
+                "(quote a file name that contains a comma)"
+            )
         name = normalise_file_name(row["commons_file"] or "")
         if not name:
             raise PipelineError("rejected_photos.csv has a line with no file name")

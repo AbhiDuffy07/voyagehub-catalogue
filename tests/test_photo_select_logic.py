@@ -75,6 +75,8 @@ def test_missing_rejected_file_means_none(tmp_path):
         "commons_file,reason\nA.jpg,\n",
         "name,reason\nA.jpg,why\n",
         "commons_file,reason\nA.jpg,why\nA_jpg.jpg,x\nA.jpg,again\n",
+        "commons_file,reason\nLata, Burdwan.jpg,why\n",  # unquoted comma: extra column
+        "commons_file,reason\nA.jpg\n",  # missing column
     ],
 )
 def test_bad_rejected_files_are_refused(tmp_path, text):
@@ -84,10 +86,16 @@ def test_bad_rejected_files_are_refused(tmp_path, text):
         load_rejected_files(path)
 
 
-def test_the_committed_rejected_list_loads():
-    from pathlib import Path
+def test_a_quoted_comma_and_a_bom_load(tmp_path):
+    path = tmp_path / "rejected.csv"
+    path.write_text('commons_file,reason\n"Lata, Burdwan.jpg",why\n', encoding="utf-8-sig")
+    assert load_rejected_files(path) == frozenset({"Lata, Burdwan.jpg"})
 
-    assert isinstance(load_rejected_files(Path("overrides/rejected_photos.csv")), frozenset)
+
+def test_the_committed_rejected_list_loads():
+    from catalogue.photos.select import REJECTED_PATH
+
+    assert len(load_rejected_files(REJECTED_PATH)) >= 1
 
 
 # --- tiers -----------------------------------------

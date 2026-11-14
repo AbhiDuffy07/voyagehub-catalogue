@@ -183,6 +183,13 @@ def test_tier_portrait_and_hero_counts(folders, tmp_path):
     assert totals["hero_quality"] == 4  # Jaipur, Agra, Amer, Paris (Walk is only 1,100 px)
 
 
+def test_overrides_matching_no_candidate_are_counted(folders, tmp_path):
+    result = run(folders, tmp_path, rejected=frozenset({"Jaipur.jpg", "Typo.jpg"}))
+    manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["rejected_files"] == 2
+    assert manifest["rejected_files_matching_no_candidate"] == 1
+
+
 def test_an_override_file_is_never_chosen(folders, tmp_path):
     result = run(folders, tmp_path, rejected=frozenset({"Jaipur.jpg"}))
     jaipur = by_subject(rows_of(result))[(1, 0)]
@@ -210,6 +217,8 @@ def test_spot_check_sample_is_seeded_and_deterministic(tmp_path):
     assert 25 <= len(rows) <= 30
     assert len({(r["page_id"], r["ordinal"]) for r in rows}) == len(rows)  # no repeats
     assert {r["bucket"] for r in rows} == {"p18", "other_tier", "lowest_score", "narrow"}
+    narrow = [int(r["long_side"]) for r in rows if r["bucket"] == "narrow"]
+    assert narrow and all(side < RULES.min_long_side * 1.25 for side in narrow)
     second = run(folders, tmp_path)
     assert (second.output_dir / "spot_check_sample.csv").read_bytes() == sample
 

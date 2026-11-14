@@ -33,6 +33,7 @@ from catalogue.photos.select import (
     load_rejected_files,
     load_selection_rules,
     name_words,
+    normalise_file_name,
 )
 
 SCHEMA_VERSION = 1
@@ -328,6 +329,10 @@ def run_photo_select(
     candidates = _candidates_by_subject(photos_folder, by_key)
     subject_words = _subject_words(enrich_folder, rules)
 
+    seen_files = {
+        normalise_file_name(c["commons_file"]) for rows_ in candidates.values() for c in rows_
+    }
+    unmatched_overrides = len(rejected - seen_files)
     read_at = today.isoformat()
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
     rows: list[dict[str, Any]] = []
@@ -465,6 +470,7 @@ def run_photo_select(
             "photo_candidates_manifest_sha256": manifest_sha,
             "inputs_sha256": input_hashes,
             "rejected_files": len(rejected),
+            "rejected_files_matching_no_candidate": unmatched_overrides,
             "totals": totals,
             "outputs_sha256": {
                 name: hashlib.sha256((target / name).read_bytes()).hexdigest()
