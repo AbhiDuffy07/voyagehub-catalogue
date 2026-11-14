@@ -62,3 +62,10 @@ def root_rules():
     from catalogue.blocks.rules import BLOCK_RULES_PATH
 
     return BLOCK_RULES_PATH.parent
+
+
+def test_subarticle_rules_load_with_a_reason():
+    sub = RULES.subarticles
+    assert "sight" in sub.kinds and "neighbourhood" not in sub.kinds
+    assert {"region", "itinerary", "topic", "city"} <= sub.skip_types
+    assert sub.parent_types == ("city",) and RULES.reasons["subarticles"].strip()

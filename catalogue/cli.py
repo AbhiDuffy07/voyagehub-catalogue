@@ -175,6 +175,18 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("out/photo_selection"),
         help="where photo-select wrote",
     )
+    blocks.add_argument(
+        "--discover-dir",
+        type=Path,
+        default=Path("out/discover"),
+        help="where discover wrote (the world folder: fetch-listings reads that one)",
+    )
+    blocks.add_argument(
+        "--summaries-dir",
+        type=Path,
+        default=Path("out/summaries"),
+        help="where wikipedia-summary wrote",
+    )
     blocks.add_argument("--out-dir", type=Path, default=Path("out/blocks"))
 
     timezones = commands.add_parser(
@@ -394,6 +406,8 @@ def _draft_blocks(args: argparse.Namespace) -> None:
         listings_folder=args.listings_dir / folder,
         enrich_folder=args.enrich_dir / folder,
         photos_folder=args.photos_dir / folder,
+        discover_folder=args.discover_dir / args.dump_date,
+        summaries_folder=args.summaries_dir / folder,
         out_dir=args.out_dir,
         dump_date=args.dump_date,
         today=datetime.now(UTC).date(),

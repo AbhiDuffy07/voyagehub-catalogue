@@ -7,6 +7,11 @@ from tests.blocksfixture import fact_row, listing_row, write_inputs
 def build(tmp_path):
     rows = [listing_row(i + 1, f"Place {i}", km_north=i * 0.2) for i in range(5)]
     lis, enr, pho = write_inputs(tmp_path / "built", rows, [fact_row(r) for r in rows])
+    built = lis.parent
+    (tmp_path / "discover").mkdir()
+    (built / "discover").rename(tmp_path / "discover" / "20261101")  # the world folder
+    (tmp_path / "summaries").mkdir()
+    (built / "summaries").rename(tmp_path / "summaries" / "20261101-IN")
     for name, src in (("listings", lis), ("enrich", enr), ("photo_selection", pho)):
         (tmp_path / name).mkdir()
         src.rename(tmp_path / name / "20261101-IN")
@@ -26,6 +31,10 @@ def draft(dirs, capsys, *extra):
         str(dirs / "enrich"),
         "--photos-dir",
         str(dirs / "photo_selection"),
+        "--discover-dir",
+        str(dirs / "discover"),
+        "--summaries-dir",
+        str(dirs / "summaries"),
         "--out-dir",
         str(dirs / "blocks"),
         *extra,

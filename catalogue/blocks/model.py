@@ -22,6 +22,9 @@ class Stop:
     unesco: bool
     has_photo: bool
     hours: dict[str, Any] | None  # parsed hours with a real schedule, else None (unknown)
+    source: str = "listing"  # listing, or article for a sub-article that is a sight
+    has_summary: bool = False  # a B4 Wikipedia summary exists
+    wikidata: str = ""  # the item id, used only to avoid listing one sight twice
 
 
 @dataclass(slots=True)

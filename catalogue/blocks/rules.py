@@ -39,6 +39,13 @@ class BlockLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class SubarticleRules:
+    kinds: tuple[str, ...]
+    skip_types: frozenset[str]
+    parent_types: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BlockRules:
     version: int
     owner_types: tuple[str, ...]
@@ -48,6 +55,7 @@ class BlockRules:
     travel: TravelRules
     areas: AreaRules
     blocks: BlockLimits
+    subarticles: SubarticleRules
     windows: dict[str, tuple[int, int]]
     morning_kinds: tuple[str, ...]
     afternoon_kinds: tuple[str, ...]
@@ -120,6 +128,7 @@ def load_block_rules(
     eligible = _table(document, "eligible", source)
     travel = _table(document, "travel", source)
     areas = _table(document, "areas", source)
+    subarticles = _table(document, "subarticles", source)
     blocks = _table(document, "blocks", source)
     hours = _table(document, "hours", source)
     slots = _table(document, "slots", source)
@@ -146,6 +155,11 @@ def load_block_rules(
             day_trip_km=_number(blocks, "day_trip_km", source),
             pair_radius_km=_number(blocks, "pair_radius_km", source),
         ),
+        subarticles=SubarticleRules(
+            kinds=tuple(_strings(subarticles, "kinds", source)),
+            skip_types=frozenset(_strings(subarticles, "skip_types", source)),
+            parent_types=tuple(_strings(subarticles, "parent_types", source)),
+        ),
         windows={name: _window(hours, name, source) for name in SLOT_NAMES},
         morning_kinds=tuple(_strings(slots, "morning", source)),
         afternoon_kinds=tuple(_strings(slots, "afternoon", source)),
@@ -155,6 +169,7 @@ def load_block_rules(
                 ("eligible", eligible),
                 ("travel", travel),
                 ("areas", areas),
+                ("subarticles", subarticles),
                 ("blocks", blocks),
                 ("hours", hours),
                 ("slots", slots),

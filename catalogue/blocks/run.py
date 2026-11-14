@@ -49,7 +49,8 @@ class BlocksResult:
     def summary(self) -> str:
         t = self.totals
         lines = [
-            f"stops used: {t['stops']} (left out: {sum(t['excluded'].values())}); "
+            f"stops used: {t['stops']} (sub-articles {t['subarticle_stops']}; "
+            f"left out: {sum(t['excluded'].values())}); "
             f"areas: {t['areas']}; blocks: {t['blocks']} in {t['cities_with_blocks']} cities "
             f"({t['by_slot_text']}); days they can fill: {t['days_fillable']}",
             f"not in a block: {t['unblocked_total']} ("
@@ -112,6 +113,8 @@ def _stop_rows(b: Block) -> list[dict[str, Any]]:
             "hop_method": s.hop_method,
             "hours_known": s.hours_known,
             "has_photo": s.stop.has_photo,
+            "has_summary": s.stop.has_summary,
+            "source": s.stop.source,
         }
         for s in b.stops
     ]
@@ -153,7 +156,9 @@ def _report(totals: dict[str, Any], city_rows: list[list[Any]], dump_date: str, 
         "- **Every travel time and distance is an estimate**: straight line x "
         f"{rules.travel.detour_factor}, {rules.travel.walk_kmh} km/h on foot; road hops assume "
         f"{rules.travel.road_kmh} km/h. No routing (B7 is deferred).",
-        f"- stops used: {t['stops']}; areas: {t['areas']}; blocks: {t['blocks']} "
+        f"- stops used: {t['stops']} (of which {t['subarticle_stops']} are sub-articles that "
+        "are sights in their own right, like Agra/Taj Mahal); "
+        f"areas: {t['areas']}; blocks: {t['blocks']} "
         f"({t['by_slot_text']}), in {t['cities_with_blocks']} cities",
         f"- days the blocks can fill (no stop repeated; two half-days or one day trip per day): "
         f"{t['days_fillable']}",
@@ -202,6 +207,8 @@ def run_draft_blocks(
     listings_folder: Path,
     enrich_folder: Path,
     photos_folder: Path,
+    discover_folder: Path,
+    summaries_folder: Path,
     out_dir: Path,
     dump_date: str,
     today: date,
@@ -211,9 +218,22 @@ def run_draft_blocks(
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_block_rules()
     country_filter = country_iso.upper() if country_iso else None
-    hashes = input_hashes(listings_folder, enrich_folder, photos_folder, country_filter)
+    hashes = input_hashes(
+        listings_folder,
+        enrich_folder,
+        photos_folder,
+        country_filter,
+        discover_folder=discover_folder,
+        summaries_folder=summaries_folder,
+    )
     stops, excluded = read_stops(
-        listings_folder, enrich_folder, photos_folder, country_filter, rules
+        listings_folder,
+        enrich_folder,
+        photos_folder,
+        country_filter,
+        rules,
+        discover_folder=discover_folder,
+        summaries_folder=summaries_folder,
     )
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
 
@@ -299,6 +319,7 @@ def run_draft_blocks(
     sample.sort(key=lambda item: item[0].block_id)
     totals = {
         "stops": len(stops),
+        "subarticle_stops": sum(1 for s in stops if s.source == "article"),
         "excluded": dict(sorted(excluded.items())),
         "areas": area_count,
         "blocks": block_count,
