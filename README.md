@@ -2,7 +2,7 @@
 
 The catalogue pipeline for VoyageHub, a travel itinerary app. It finds tourist destinations and attractions worldwide from open sources (Wikivoyage, Wikidata, Wikimedia Commons, OpenStreetMap), checks them with automatic rules, and publishes them as static JSON files. India is the first rollout; nothing in the code is country-specific.
 
-**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and seven jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates` and `photo-select`. They write local files only; nothing is stored in a database yet. The other jobs come next.
+**Status:** early. The skeleton exists (settings, a polite Wikimedia client, a TLS database connection, a run log, a CLI and CI), and eight jobs work: `discover`, `fetch-listings`, `enrich-wikidata`, `wikipedia-summary`, `derive-timezone`, `photo-candidates`, `photo-select` and `draft-blocks`. They write local files only; nothing is stored in a database yet. The other jobs come next.
 
 ## Licences
 
@@ -131,6 +131,28 @@ Offline and fast (seconds): no network, no settings. It reads `out/photos/<dump 
 - **No photo:** `photo: null` and a flag (a subject whose Commons category search was busy in photo-candidates shows as `no_candidate` here, because photo-candidates keeps that flag on the subject, not on a row; check its `category_search_busy` count before reading `no_candidate` as "nothing exists"; `no_candidate`, `no_usable_candidate`, `only_excluded`, `only_unrelated_category`, `only_below_gate`). Never a guess.
 - **Report:** coverage (the share of destinations and see/do listings with a selected photo, using photo-candidates' denominators), the tiers, the flags, and **what the size gate costs**: covered subjects (a candidate survived the drops), those the gate removes (`lost_to_gate.csv`) and the percentage. Above 5% the report opens with a warning, because the rules are not frozen until that has been looked at.
 - **Files:** `photo_selection.jsonl` (one row per subject: the photo with its whole credit from B5, tier, score, alternatives, flags), `selection_by_country.csv`, `flags_by_country.csv`, `lost_to_gate.csv`, `spot_check_sample.csv` (a seeded sample of 30 rows for review), `report.md` and `manifest.json`. A second run on the same day gives identical files.
+
+### `draft-blocks`
+
+```text
+.venv\Scripts\python -m catalogue draft-blocks --dump-date 20261101 --country IN
+```
+
+Offline and fast (seconds): no network, no settings. It reads `out/listings/`, `out/enrich/` and `out/photo_selection/` (each hash-checked against its own manifest and country filter) and writes `out/blocks/<dump date>[-CC]/`: walkable **areas** and **draft day blocks** (2 to 4 see/do stops close together) for every city. Rules and their reasons: `config/block_rules.toml` and `config/durations.toml` (rows carry `rules_version`; every block has `status = "draft"`: B10 `auto-check` is the gate).
+
+- **Every travel figure is an estimate** (B7 routing is deferred): straight line x 1.3 at 4.5 km/h on foot; a hop over 30 minutes on foot, or the transfer to a far area, uses an assumed 20 km/h by road. Rows say `method = "estimate"` and the block text says "(estimate)".
+- **Which stops:** `see` and `do` listings under a city, with a trusted point (the listing's own, or the one `enrich-wikidata` filled), not a duplicate, with a name. Left out and counted by reason (never guessed): a point two sources disagree on, an invalid or link-derived point, **three or more different places with exactly the same point** (a copied coordinate), no point at all, and sections or owners that are not planned.
+- **Areas:** greedy and deterministic. Stops are taken in priority order (UNESCO, has a B6 photo, has known hours, has a known kind, then name); a stop joins the nearest area whose centre is within 1.2 km on foot, else starts a new one.
+- **Blocks:** the first stop of a block is the highest-priority unused stop of an area; the block grows by the nearest stop while it stays within about 4 hours (visit midpoints plus walks), no walking hop is over 30 minutes and each stop is open for the slot. An area gets at most two blocks (one morning, one afternoon), because stops this close are often one complex (Agra Fort has about fifteen listings). Every stop is in at most one block.
+- **Slot:** from the kind of the first stop (`config/block_rules.toml`; fort, park, viewpoint, religious, sight in the morning; museum, market, neighbourhood in the afternoon); a stop with no kind alternates morning/afternoon (`slot_basis = "alternate"`, either half works). No evening blocks. Nothing is inferred from hours.
+- **Hours (light):** a stop is skipped for a slot only when its own parsed hours leave it closed for the whole slot on every day. Unknown hours never exclude a stop; each block counts them in `hours_unknown_count`. Only about 12% of see/do stops have any hours, so most blocks have several unknown. No time is ever invented.
+- **Far areas (day trips):** an area whose centre is over 8 km (straight line) from the city's median stop; far areas within 6 km of each other share one zone and **one** block, with an estimated road transfer from the city centre. It is a `full_day` block only if its visits plus both transfers do not fit half a day.
+- **Isolated stops:** a stop that cannot make a block of at least two is paired with the nearest other left-over stop within 6 km (a road hop, flagged `paired_isolated_stops`); otherwise it is listed in `unblocked_stops.csv` with its reason (`isolated_stop`, `area_block_limit`, `day_trip_area_limit`, `closed_in_slot`). There are no one-stop blocks.
+- **Duration table:** minutes per stop kind (palace 90-120, museum 60-90, temple 30-45 are the design's own; the rest are the author's round numbers, all labelled estimates). A stop with no kind (about two in three) uses the `see` or `do` default and says so (`duration_basis = "default"`).
+- **Text is facts only:** the title is "Morning around <first stop>"; the intro lists stop names, about N h, km on foot and the road time, each marked as an estimate. No prices, hours or links.
+- **Days they can fill:** a day is a morning block plus an afternoon block, or one full-day block; blocks whose slot only alternated count for either half. No stop repeats.
+- **Files:** `areas.jsonl`, `area_travel.jsonl` (estimated travel between nearby area centres), `day_blocks.jsonl`, `day_block_stops.jsonl`, `unblocked_stops.csv`, `city_summary.csv`, `report.md` (counts, what was left out, per city blocks and days), `spot_check_sample.md` (a seeded sample of 20 blocks) and `manifest.json`. A rerun gives identical files.
+- **Known gaps (data, not code):** a sight that Wikivoyage keeps as its own article instead of a listing is not a stop (the Taj Mahal is the article `Agra/Taj Mahal`, a district with Wikidata coordinates, so Agra's blocks do not include it); `see` also holds places that are not sights (stadiums, cinemas, institutes) and two in three stops have no kind, so block quality cannot be told from data alone.
 
 ## Known follow-ups
 

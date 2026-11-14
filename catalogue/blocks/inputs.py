@@ -1,0 +1,152 @@
+"""Read the stops: see/do listings with a trusted point, joined with their facts and photo state.
+
+The three input folders are hash-checked against their own manifests, so a stale or edited file is
+refused. A listing that cannot be used is counted under the first reason that applies; nothing is
+filled in or guessed. Error messages name files only (the logs are public).
+"""
+
+import json
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+from catalogue.blocks.model import Stop
+from catalogue.blocks.rules import BlockRules
+from catalogue.enrich.inputs import _rows, _sha256, verify_enrich_output
+from catalogue.errors import PipelineError
+
+LISTINGS_FILE = "listings.jsonl"
+FACTS_FILE = "listing_facts.jsonl"
+PHOTOS_FILE = "photo_selection.jsonl"
+
+
+def _verify(folder: Path, name: str, job: str, country_filter: str | None) -> str:
+    manifest_path = folder / "manifest.json"
+    if not manifest_path.is_file():
+        raise PipelineError(f"manifest.json not found in {folder}; run {job} first")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        recorded_country = manifest["country_filter"]
+        recorded = manifest["outputs_sha256"][name]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise PipelineError(f"the {job} manifest.json is damaged; run {job} again") from None
+    if recorded_country != country_filter:
+        raise PipelineError(f"{job} was run for a different country filter; use the same --country")
+    path = folder / name
+    if not path.is_file():
+        raise PipelineError(f"{name} not found in {folder}")
+    digest = _sha256(path)
+    if digest != recorded:
+        raise PipelineError(f"{name} does not match the {job} manifest")
+    return digest
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _point(lat: Any, lon: Any) -> tuple[float, float] | None:
+    la, lo = _number(lat), _number(lon)
+    if la is None or lo is None or not -90 <= la <= 90 or not -180 <= lo <= 180:
+        return None
+    return la, lo
+
+
+def _real_hours(parsed: Any) -> dict[str, Any] | None:
+    """Parsed hours count as known only with a schedule (or open all day); else unknown."""
+    if isinstance(parsed, dict) and (parsed.get("always_open") or parsed.get("schedule")):
+        return parsed
+    return None
+
+
+def input_hashes(
+    listings_folder: Path, enrich_folder: Path, photos_folder: Path, country_filter: str | None
+) -> dict[str, str]:
+    hashes = {
+        LISTINGS_FILE: _verify(listings_folder, LISTINGS_FILE, "fetch-listings", country_filter)
+    }
+    _, enrich = verify_enrich_output(enrich_folder, country_filter, (FACTS_FILE,))
+    hashes.update(enrich)
+    hashes[PHOTOS_FILE] = _verify(photos_folder, PHOTOS_FILE, "photo-select", country_filter)
+    return hashes
+
+
+def read_stops(
+    listings_folder: Path,
+    enrich_folder: Path,
+    photos_folder: Path,
+    country_filter: str | None,
+    rules: BlockRules,
+) -> tuple[list[Stop], dict[str, int]]:
+    """The usable stops (sorted by owner, page, ordinal) and a count of the rest by reason."""
+    facts = {(r["page_id"], r["ordinal"]): r for r in _rows(enrich_folder / FACTS_FILE)}
+    with_photo = {
+        (r["page_id"], r["ordinal"])
+        for r in _rows(photos_folder / PHOTOS_FILE)
+        if r.get("subject") == "listing" and r.get("photo")
+    }
+    stops: list[Stop] = []
+    excluded: Counter = Counter()
+    for row in _rows(listings_folder / LISTINGS_FILE):
+        try:
+            key = (row["page_id"], row["ordinal"])
+            name = (row["name"] or "").strip()
+            fact = facts.get(key)
+            if row["kind"] not in rules.sections:
+                excluded["section_not_planned"] += 1
+            elif row["owner_type"] not in rules.owner_types:
+                excluded["owner_type_not_planned"] += 1
+            elif row["duplicate_of"]:
+                excluded["duplicate"] += 1
+            elif not name:
+                excluded["no_name"] += 1
+            elif rules.blocked_flags & (
+                set((fact or {}).get("flags") or []) | set(row["quality_flags"] or [])
+            ):
+                excluded["coord_disputed"] += 1
+            else:
+                if fact is not None:
+                    point = _point(fact.get("coord_lat"), fact.get("coord_long"))
+                elif "coord_invalid" in (row["quality_flags"] or []):
+                    point = None
+                else:
+                    point = _point(row["lat"], row["long"])
+                if point is None:
+                    excluded["no_coordinates"] += 1
+                    continue
+                stops.append(
+                    Stop(
+                        key=row["listing_key"],
+                        page_id=row["page_id"],
+                        ordinal=row["ordinal"],
+                        owner_id=row["owner_page_id"],
+                        owner_slug=row["owner_slug"] or str(row["owner_page_id"]),
+                        owner_title=row["owner_title"] or "",
+                        name=name,
+                        lat=point[0],
+                        lon=point[1],
+                        section=row["kind"],
+                        kind=(fact or {}).get("kind"),
+                        unesco=bool((fact or {}).get("is_unesco")),
+                        has_photo=key in with_photo,
+                        hours=_real_hours(row.get("hours_parsed")),
+                    )
+                )
+        except KeyError:
+            raise PipelineError("listings.jsonl has a damaged row") from None
+    names_at: dict[tuple, set[str]] = {}
+    for s in stops:
+        names_at.setdefault((s.owner_id, round(s.lat, 6), round(s.lon, 6)), set()).add(
+            s.name.casefold()
+        )
+    shared = {k for k, names in names_at.items() if len(names) >= rules.shared_coordinate_names}
+    if shared:
+        kept = [s for s in stops if (s.owner_id, round(s.lat, 6), round(s.lon, 6)) not in shared]
+        excluded["coord_shared"] += len(stops) - len(kept)
+        stops = kept
+    stops.sort(key=lambda s: (s.owner_id, s.page_id, s.ordinal))
+    return stops, dict(excluded)
