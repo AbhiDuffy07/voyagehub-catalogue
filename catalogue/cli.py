@@ -2,8 +2,8 @@
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
 enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
-in B6, draft-blocks in B8, auto-check in B10, price-bands in B11; the rest arrive one by one in
-later sessions).
+in B6, draft-blocks in B8, auto-check in B10, price-bands in B11, readiness in B12; the rest arrive
+one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -18,6 +18,7 @@ import psycopg
 
 from catalogue import __version__
 from catalogue.blocks.check_run import run_auto_check
+from catalogue.blocks.inputs import SLUGS_PATH
 from catalogue.blocks.run import run_draft_blocks
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import dump_filename, fetch_dump
@@ -33,6 +34,7 @@ from catalogue.listings.run import run_fetch_listings
 from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
 from catalogue.prices.run import run_price_bands
+from catalogue.readiness.run import run_readiness
 from catalogue.settings import Settings, SettingsError, load_settings
 
 SITEINFO_URL = "https://en.wikivoyage.org/w/api.php"
@@ -219,6 +221,37 @@ def _parser() -> argparse.ArgumentParser:
         "--checks-dir", type=Path, default=Path("out/block_checks"), help="where auto-check wrote"
     )
     prices.add_argument("--out-dir", type=Path, default=Path("out/prices"))
+
+    readiness = commands.add_parser(
+        "readiness",
+        help="decide which cities are ready, plannable or browse only, and publish/unpublish "
+        "(offline)",
+    )
+    readiness.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    readiness.add_argument("--country", help="only this ISO country code (same as auto-check)")
+    for flag, default, help_text in (
+        ("--listings-dir", "out/listings", "where fetch-listings wrote"),
+        ("--summaries-dir", "out/summaries", "where wikipedia-summary wrote"),
+        ("--photos-dir", "out/photo_selection", "where photo-select wrote"),
+        ("--blocks-dir", "out/blocks", "where draft-blocks wrote"),
+        ("--checks-dir", "out/block_checks", "where auto-check wrote"),
+        (
+            "--timezones-dir",
+            "out/timezones",
+            "where derive-timezone wrote (the world run is used when there is no country run)",
+        ),
+        ("--discover-dir", "out/discover", "where discover wrote (the world folder)"),
+    ):
+        readiness.add_argument(flag, type=Path, default=Path(default), help=help_text)
+    readiness.add_argument(
+        "--slugs-path", type=Path, default=SLUGS_PATH, help="the slug registry (slugs.json)"
+    )
+    readiness.add_argument(
+        "--previous",
+        type=Path,
+        help="the readiness folder of the previous run (carries the publication state)",
+    )
+    readiness.add_argument("--out-dir", type=Path, default=Path("out/readiness"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -476,6 +509,31 @@ def _price_bands(args: argparse.Namespace) -> None:
     print(f"files: {result.output_dir}")
 
 
+def _readiness(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    # A country run may use the world time zones: derive-timezone has been run for the world.
+    zones = args.timezones_dir / folder
+    if not (zones / "manifest.json").is_file():
+        zones = args.timezones_dir / args.dump_date
+    result = run_readiness(
+        listings_folder=args.listings_dir / folder,
+        summaries_folder=args.summaries_dir / folder,
+        photos_folder=args.photos_dir / folder,
+        blocks_folder=args.blocks_dir / folder,
+        checks_folder=args.checks_dir / folder,
+        timezones_folder=zones,
+        discover_folder=args.discover_dir / args.dump_date,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+        previous_folder=args.previous,
+        slugs_path=args.slugs_path,
+    )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -558,6 +616,8 @@ def main(
             _auto_check(args)
         elif args.command == "price-bands":
             _price_bands(args)
+        elif args.command == "readiness":
+            _readiness(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
         else:

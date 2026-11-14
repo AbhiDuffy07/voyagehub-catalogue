@@ -1,0 +1,43 @@
+# Rules for readiness (B12): which cities the app may serve, and how. Nothing here is country-specific.
+# Change a value only together with its reason, and bump readiness_rules_version.
+#
+# A city is READY when it has a summary, a time zone, enough photos, and a checked block. A ready
+# city whose checked blocks fill at least one whole day is PLANNABLE; otherwise it is BROWSE ONLY
+# (the app shows it but offers no day plan). Every input comes from an earlier automatic job; nobody
+# approves a city by hand.
+
+readiness_rules_version = 1
+
+[city]
+# Only these Wikivoyage article types are assessed. Regions, parks and stations are not city pages;
+# their places are rolled up into the city that owns them (B8 plans city-owned stops only).
+eligible_types = ["city"]
+reason = """The app's destination page is a city page. Districts' listings belong to the owning \\
+city already, and regions or parks have no day blocks, so judging them here would only add \\
+not-ready noise to the counts."""
+
+[photos]
+# A hero photo is a B6 photo whose long side is at least 2,000 px (config/photo_select.toml, set by
+# B6, not here), on the city's own article or on one of its places. A photographed place is a see or
+# do listing owned by the city with its own B6 photo (at least 640 px, B6's gate).
+min_hero_photos = 1
+min_photographed_places = 3
+place_sections = ["see", "do"]
+reason = """Owner ruling 2026-11-15: one sharp hero photo for the top of the page, and at least three \\
+places with their own photo so the page shows a proper group of pictures instead of one image and \\
+empty cards. Checked on India (dump 20261101): 3 places gives 156 ready cities, 2 gives 233, 5 gives 65."""
+
+[blocks]
+# Checked blocks come from auto-check (B10). A whole day is one full-day block, or a morning plus an
+# afternoon block (blocks/build.py pair_days).
+min_checked_blocks = 1
+min_plannable_days = 1
+reason = """One checked block proves the city has mappable, plausible sights. A day plan needs a \\
+whole day: without one the app can only browse the city, so it is not offered as plannable."""
+
+[publish]
+# A ready city is published at once. A published city is unpublished only after this many runs in a
+# row where it was not ready, so one bad run (a failed fetch, a damaged article) does not remove it.
+unpublish_after_failed_runs = 2
+reason = """Design section 10: unpublish only after two failed runs in a row. The count lives in the \\
+state file carried from one run to the next."""
