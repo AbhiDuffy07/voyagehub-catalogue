@@ -62,11 +62,16 @@ class BlockRules:
     reasons: dict[str, str]
     kind_durations: dict[str, tuple[int, int]]
     default_durations: dict[str, tuple[int, int]]
+    unesco_duration: tuple[int, int]
     duration_reasons: dict[str, str] = field(default_factory=dict)
 
-    def duration(self, kind: str | None, section: str) -> tuple[int, int, str]:
-        """(min minutes, max minutes, basis): `kind` when the table has the kind, else the
-        section's default (`default`)."""
+    def duration(
+        self, kind: str | None, section: str, unesco: bool = False
+    ) -> tuple[int, int, str]:
+        """(min minutes, max minutes, basis): `unesco` for a UNESCO site, `kind` when the table
+        has the kind, else the section's default (`default`)."""
+        if unesco:
+            return (*self.unesco_duration, "unesco")
         if kind in self.kind_durations:
             low, high = self.kind_durations[kind]
             return low, high, "kind"
@@ -94,7 +99,7 @@ def _window(table: dict[str, Any], key: str, source: str) -> tuple[int, int]:
     return value[0], value[1]
 
 
-def _load_durations(path: Path) -> tuple[dict, dict, dict]:
+def _load_durations(path: Path) -> tuple[dict, dict, tuple[int, int], dict]:
     source = path.name
     document = _read(path)
     reasons: dict[str, str] = {}
@@ -114,7 +119,13 @@ def _load_durations(path: Path) -> tuple[dict, dict, dict]:
     for section in ("see", "do"):
         if section not in groups["defaults"]:
             raise PipelineError(f"{source}: [defaults.{section}] is missing")
-    return groups["kinds"], groups["defaults"], reasons
+    unesco = _table(document, "unesco", source)
+    low = _number(unesco, "min", f"{source} [unesco]", whole=True)
+    high = _number(unesco, "max", f"{source} [unesco]", whole=True)
+    if low > high:
+        raise PipelineError(f"{source}: [unesco] has min above max")
+    reasons["unesco"] = _reason(unesco, source, "unesco")
+    return groups["kinds"], groups["defaults"], (low, high), reasons
 
 
 def load_block_rules(
@@ -132,7 +143,7 @@ def load_block_rules(
     blocks = _table(document, "blocks", source)
     hours = _table(document, "hours", source)
     slots = _table(document, "slots", source)
-    kinds, defaults, duration_reasons = _load_durations(durations_path)
+    kinds, defaults, unesco_duration, duration_reasons = _load_durations(durations_path)
     rules = BlockRules(
         version=version,
         owner_types=tuple(_strings(eligible, "owner_types", source)),
@@ -177,6 +188,7 @@ def load_block_rules(
         },
         kind_durations=kinds,
         default_durations=defaults,
+        unesco_duration=unesco_duration,
         duration_reasons=duration_reasons,
     )
     if rules.blocks.full_day_minutes < rules.blocks.half_day_minutes:

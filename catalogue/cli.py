@@ -2,7 +2,7 @@
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
 enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
-in B6, draft-blocks in B8; the rest arrive one by one in later sessions).
+in B6, draft-blocks in B8, auto-check in B10; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -16,6 +16,7 @@ from typing import Any
 import psycopg
 
 from catalogue import __version__
+from catalogue.blocks.check_run import run_auto_check
 from catalogue.blocks.run import run_draft_blocks
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import dump_filename, fetch_dump
@@ -188,6 +189,17 @@ def _parser() -> argparse.ArgumentParser:
         help="where wikipedia-summary wrote",
     )
     blocks.add_argument("--out-dir", type=Path, default=Path("out/blocks"))
+
+    checks = commands.add_parser(
+        "auto-check",
+        help="give every draft day block a status, checked, flagged or rejected (offline)",
+    )
+    checks.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    checks.add_argument("--country", help="only this ISO country code (same as draft-blocks)")
+    checks.add_argument(
+        "--blocks-dir", type=Path, default=Path("out/blocks"), help="where draft-blocks wrote"
+    )
+    checks.add_argument("--out-dir", type=Path, default=Path("out/block_checks"))
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -417,6 +429,19 @@ def _draft_blocks(args: argparse.Namespace) -> None:
     print(f"files: {result.output_dir}")
 
 
+def _auto_check(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    result = run_auto_check(
+        blocks_folder=args.blocks_dir / folder,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+    )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -495,6 +520,8 @@ def main(
             _photo_select(args)
         elif args.command == "draft-blocks":
             _draft_blocks(args)
+        elif args.command == "auto-check":
+            _auto_check(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
         else:

@@ -45,7 +45,7 @@ class BlockStop:
     position: int  # 1..
     minutes_min: int
     minutes_max: int
-    duration_basis: str  # kind or default
+    duration_basis: str  # kind, default or unesco
     hop_minutes: float  # estimated travel from the previous stop (0 for the first)
     hop_km: float  # estimated distance of that hop (straight line x detour factor)
     hop_method: str  # walk or road ("" for the first stop)

@@ -1,0 +1,41 @@
+# Rules for auto-check (B10): the status of each draft day block. Nothing here is country-specific.
+# Change a value only together with its reason, and bump check_rules_version.
+#
+# B8 already guarantees the stop count, walking hops, known hours and no stop reuse; auto-check only
+# re-checks the ones it can from B8's own output, with B8's own rules (config/block_rules.toml),
+# and adds the one thing B8 cannot know: whether a stop is a place a visitor goes to see.
+
+check_rules_version = 1
+
+[non_sight]
+# A stop is a non-sight when ALL of these hold: its kind is not one of sight_kinds (an unknown kind,
+# or a neighbourhood), it is not a UNESCO site, its name has none of sight_words, and its name
+# contains one of `words` as a whole word (case-insensitive, an English plural counts). The first
+# word in this list that matches is reported. A non-sight stop is flagged, never removed.
+words = [
+  "stadium", "institute", "university", "college", "school", "office", "hospital", "cinema",
+  "theatre", "theater", "auditorium", "golf", "club", "race course", "racecourse", "court",
+  "secretariat", "factory", "hostel", "sports", "headquarters", "bus stand",
+  "municipal corporation",
+]
+# A name with any of these is a place to see even when it also holds a word above ("Ambaji Temple
+# behind GMERS Hospital", "Don Bosco Church and School", "History Museum - ... University").
+# "memorial" is deliberately not here: it also names hospitals and stadiums ("Tata Memorial
+# Hospital"); a memorial is a sight through its kind or another word (tomb, monument).
+sight_words = [
+  "temple", "mandir", "church", "chapel", "cathedral", "mosque", "masjid", "dargah",
+  "gurdwara", "monastery", "synagogue", "pagoda", "stupa", "gompa", "fort", "castle", "palace",
+  "museum", "tomb", "monument", "garden", "bagh", "ghat", "lake", "falls", "cave", "shrine",
+  "basilica", "stepwell", "baori", "ashram", "gate", "mahal", "minar",
+]
+# Kinds (from Wikidata, config/kind_map.toml) that make a stop a sight whatever its name says.
+sight_kinds = [
+  "sight", "museum", "religious", "fort_palace", "park_nature", "market", "viewpoint", "activity",
+]
+reason = """Wikivoyage's see and do sections also hold stadiums, cinemas, colleges, clubs and \\
+offices. Wikidata cannot say they are not sights (most stops have no kind), so a clear name word \\
+decides, but only when nothing else says the stop is a place to visit. Ambiguous words (bhavan, \\
+centre, complex, research, bank, mall, academy) are left out on purpose: they name temples \\
+and museums as often as offices. A block with non-sight stops but at least the minimum number of \\
+sights left is flagged (held back until a rule clears it); a block left with fewer is rejected. The \\
+stops are never removed or rewritten, so a wrong flag costs a held-back block, not lost data."""

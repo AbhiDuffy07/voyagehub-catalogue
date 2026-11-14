@@ -2,7 +2,7 @@
 # These are ESTIMATES, not measured data: the first three are the design's own examples (palace
 # 90-120, museum 60-90, temple 30-45); the rest are the author's round numbers. A stop whose kind is
 # unknown (about two in three on the India run) uses the default for its section and is stored with
-# `duration_basis = "default"`. Nothing here is country-specific. Change a value only together with
+# `duration_basis = "default"`; a UNESCO site uses the [unesco] estimate (`duration_basis = "unesco"`). Nothing here is country-specific. Change a value only together with
 # its reason, and bump rules_version in config/block_rules.toml.
 
 [kinds.fort_palace]
@@ -49,6 +49,14 @@ reason = "A walk through an old quarter. Estimate."
 min = 60
 max = 120
 reason = "A named activity (show, ride, class) takes a session. Estimate."
+
+[unesco]
+min = 120
+max = 180
+reason = """UNESCO World Heritage sites (strict: a listed site, not a component of one) are large \
+complexes with many courtyards, galleries and queues, so one flat 2-3 hours replaces the kind \
+estimate (the Taj Mahal and Agra Fort are each a half-day visit). Estimate, not measured; one \
+number for every such site, not a per-site figure."""
 
 [defaults.see]
 min = 30
