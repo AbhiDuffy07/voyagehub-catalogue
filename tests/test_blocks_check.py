@@ -79,6 +79,10 @@ def test_a_block_of_only_non_sights_is_rejected():
         "Gita Bhavan",
         "Club Mahindra Fort",
         "The Mall road",  # Mussoorie and Shimla promenades are sights; mall is not on the list
+        "King's College Chapel",  # chapel is a sight word
+        "Trinity College Castle",
+        "Hospitalité Café",  # a word boundary is any non-letter, not just ASCII
+        "Clubé Real",
         "Kala Academy",  # arts academies are cultural venues, not on the list
         "Academy of Fine Arts",
     ],
@@ -108,6 +112,12 @@ def test_names_with_a_sight_word_or_no_listed_word_are_not_flagged(name):
         ("Southern Railway Headquarters", "headquarters"),
         ("Palayamkottai Bus Stand", "bus stand"),
         ("Municipal Corporation Building", "municipal corporation"),
+        ("Tata Memorial Hospital", "hospital"),  # "memorial" is not a sight word
+        ("Veterans Memorial Stadium", "stadium"),
+        ("State Universities Press", "university"),
+        ("Cotton Factories", "factory"),
+        ("Old Race-course", "race course"),
+        ("Old  Race   Course", "race course"),
     ],
 )
 def test_clear_non_sight_names_with_unknown_kind_are_flagged(name, word):
@@ -134,9 +144,7 @@ def test_a_neighbourhood_kind_does_not_protect_a_non_sight_name():
 def test_the_first_listed_word_is_reported_when_several_match():
     stops = stops_for("b1", "Golf Club", "Amer Fort", "Panna Meena")
     stops[1]["kind"] = stops[2]["kind"] = "fort_palace"
-    words = [f["word"] for f in check(block_row(), stops).flagged]
-    assert len(words) == 1 and words[0] in {"golf", "club"}
-    assert words == [f["word"] for f in check(block_row(), stops).flagged]
+    assert [f["word"] for f in check(block_row(), stops).flagged] == ["golf"]
 
 
 # --- B8's guarantees, re-checked with B8's own rules -------------------------------------
@@ -187,3 +195,33 @@ def test_reasons_are_listed_once_each_in_a_fixed_order():
         "stop_used_twice",
         "non_sight_stops",
     ]
+
+
+def test_names_that_are_not_text_do_not_crash_the_check():
+    stops = stops_for("b1", "Amer Fort", "Panna Meena")
+    stops[1]["name"] = None
+    assert check(block_row(), stops).flagged == []
+    stops[1]["name"] = 42
+    assert check(block_row(), stops).flagged == []
+
+
+def test_a_block_with_no_stop_rows_is_rejected_not_a_crash():
+    verdict = check(block_row(), [])
+    assert verdict.status == "rejected" and verdict.failures == ["stop_count_out_of_range"]
+
+
+def test_days_from_the_row_view_match_b8s_own_count_on_real_blocks():
+    from types import SimpleNamespace
+
+    from catalogue.blocks.build import days_fillable
+    from catalogue.blocks.model import Block
+
+    combos = [
+        ("morning", "kind"),
+        ("afternoon", "kind"),
+        ("morning", "alternate"),
+        ("full_day", "trip"),
+    ]
+    real = [Block(1, "x", [1], slot, False, [], 0, 0.0, 0, 0, slot_basis=b) for slot, b in combos]
+    view = [SimpleNamespace(slot=slot, slot_basis=b) for slot, b in combos]
+    assert days_fillable(real) == days_fillable(view)

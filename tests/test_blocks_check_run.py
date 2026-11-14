@@ -161,3 +161,46 @@ def test_a_stop_in_two_blocks_is_rejected_from_the_files(blocks, tmp_path):
     result = check(blocks, tmp_path)
     reused = [r for r in rows(result) if "stop_used_twice" in r["check_failures"]]
     assert {r["owner_slug"] for r in reused} == {"agra", "varanasi"}
+
+
+def _rewrite(blocks, name, mutate):
+    path = blocks / name
+    rows_ = [json.loads(x) for x in path.read_text("utf-8").splitlines()]
+    for row in rows_:
+        mutate(row)
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows_), encoding="utf-8")
+    manifest = json.loads((blocks / "manifest.json").read_text(encoding="utf-8"))
+    manifest["outputs_sha256"][name] = sha(path)
+    (blocks / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "name,mutate",
+    [
+        ("day_block_stops.jsonl", lambda r: r.pop("source")),
+        ("day_block_stops.jsonl", lambda r: r.update(page_id=[1])),
+        ("day_block_stops.jsonl", lambda r: r.update(hop_minutes="far")),
+        ("day_block_stops.jsonl", lambda r: r.update(name=5)),
+        ("day_blocks.jsonl", lambda r: r.pop("title")),
+        ("day_blocks.jsonl", lambda r: r.update(owner_slug=["x"])),
+        ("day_blocks.jsonl", lambda r: r.update(minutes="long")),
+    ],
+)
+def test_a_hash_valid_but_damaged_row_is_one_clear_error(blocks, tmp_path, name, mutate):
+    _rewrite(blocks, name, mutate)
+    with pytest.raises(PipelineError, match="has a damaged row"):
+        check(blocks, tmp_path)
+
+
+def test_blocks_built_under_other_rules_are_refused(blocks, tmp_path):
+    manifest = json.loads((blocks / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rules_version"] = 1
+    (blocks / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PipelineError, match="run draft-blocks again"):
+        check(blocks, tmp_path)
+
+
+def test_the_sample_cannot_break_its_own_structure(blocks, tmp_path):
+    _rewrite(blocks, "day_block_stops.jsonl", lambda r: r.update(name=r["name"] + "\n# Injected"))
+    text = (check(blocks, tmp_path).output_dir / "flagged_sample.md").read_text("utf-8")
+    assert "\n# Injected" not in text

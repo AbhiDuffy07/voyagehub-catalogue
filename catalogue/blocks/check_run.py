@@ -66,21 +66,59 @@ def _slot_view(block: dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(slot=block["slot"], slot_basis=block.get("slot_basis", "kind"))
 
 
+_NUMBER = (int, float)
+_BLOCK_FIELDS = {
+    "block_id": str,
+    "slot": str,
+    "minutes": _NUMBER,
+    "owner_slug": str,
+    "title": str,
+    "intro": str,
+}
+_STOP_FIELDS = {
+    "block_id": str,
+    "position": int,
+    "page_id": int,
+    "ordinal": int,
+    "source": str,
+    "hop_method": str,
+    "hop_minutes": _NUMBER,
+    "name": (str, type(None)),
+    "kind": (str, type(None)),
+}
+
+
+def _validate(row: dict, fields: dict) -> None:
+    for key, types in fields.items():
+        value = row[key]
+        if isinstance(value, bool) or not isinstance(value, types):
+            raise TypeError(key)
+
+
 def _read(folder: Path) -> tuple[list[dict], dict[str, list[dict]]]:
+    """The block and stop rows, each checked for the fields and types this job uses (a damaged
+    row names its file, never its content)."""
     try:
         blocks = list(_rows(folder / BLOCKS_FILE))
+        for block in blocks:
+            _validate(block, _BLOCK_FIELDS)
+    except (KeyError, TypeError):
+        raise PipelineError(f"{BLOCKS_FILE} has a damaged row") from None
+    try:
         stops: dict[str, list[dict]] = defaultdict(list)
         for row in _rows(folder / STOPS_FILE):
+            _validate(row, _STOP_FIELDS)
             stops[row["block_id"]].append(row)
         for rows in stops.values():
             rows.sort(key=lambda r: r["position"])
-        for block in blocks:
-            for key in ("block_id", "slot", "minutes", "owner_slug"):
-                if key not in block:
-                    raise KeyError(key)
     except (KeyError, TypeError):
-        raise PipelineError(f"{BLOCKS_FILE} or {STOPS_FILE} has a damaged row") from None
+        raise PipelineError(f"{STOPS_FILE} has a damaged row") from None
     return blocks, stops
+
+
+def _md(value: Any) -> str:
+    """One line of plain text for a markdown file: no line breaks that could start a heading."""
+    return " ".join(str(value).split())
 
 
 def _sample_text(sample: list[tuple[dict, Verdict, list[dict]]]) -> str:
@@ -93,13 +131,16 @@ def _sample_text(sample: list[tuple[dict, Verdict, list[dict]]]) -> str:
     for block, verdict, stops in sample:
         flagged = {f["position"]: f["word"] for f in verdict.flagged}
         lines += [
-            f"## {block['owner_title']}: {block['title']} ({verdict.status})",
+            f"## {_md(block.get('owner_title') or block['owner_slug'])}: "
+            f"{_md(block['title'])} ({verdict.status})",
             f"- reasons: {', '.join(verdict.failures)}",
-            f"- {block['intro']}",
+            f"- {_md(block['intro'])}",
         ]
         for s in stops:
             mark = f"  <- non-sight: {flagged[s['position']]}" if s["position"] in flagged else ""
-            lines.append(f"  {s['position']}. {s['name']} [{s['kind'] or 'kind unknown'}]{mark}")
+            lines.append(
+                f"  {s['position']}. {_md(s['name'])} [{_md(s['kind'] or 'kind unknown')}]{mark}"
+            )
         lines.append("")
     return "\n".join(lines)
 
@@ -173,6 +214,11 @@ def run_auto_check(
         ]
     except (OSError, ValueError, KeyError, TypeError):
         raise PipelineError("the draft-blocks manifest.json is damaged; run it again") from None
+    if blocks_rules_version != block_rules.version:
+        raise PipelineError(
+            f"draft-blocks output was built with blocks rules version {blocks_rules_version} "
+            f"but the current rules are version {block_rules.version}; run draft-blocks again"
+        )
     blocks, stops_by_block = _read(blocks_folder)
 
     owners_of: dict[tuple, set[str]] = defaultdict(set)

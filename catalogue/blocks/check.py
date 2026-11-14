@@ -46,7 +46,15 @@ class Verdict:
 
 
 def _word_pattern(word: str) -> re.Pattern[str]:
-    return re.compile(rf"(?<![a-z0-9]){re.escape(word.casefold())}s?(?![a-z0-9])")
+    """A whole word (any non-letter, non-digit around it, Unicode included), an English plural
+    counts (-s, -es, -y/-ies), and a space in the word matches spaces or hyphens."""
+    folded = word.casefold()
+    base = re.escape(folded).replace("\\ ", r"[\s-]+")
+    if folded.endswith("y") and not folded.endswith(("ay", "ey", "oy", "uy")):
+        body = base[:-1] + "(?:y|ies)"
+    else:
+        body = base + "(?:es|s)?"
+    return re.compile(rf"(?<!\w){body}(?!\w)")
 
 
 def load_check_rules(path: Path = CHECK_RULES_PATH) -> CheckRules:

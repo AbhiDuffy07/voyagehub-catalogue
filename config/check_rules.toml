@@ -20,11 +20,13 @@ words = [
 ]
 # A name with any of these is a place to see even when it also holds a word above ("Ambaji Temple
 # behind GMERS Hospital", "Don Bosco Church and School", "History Museum - ... University").
+# "memorial" is deliberately not here: it also names hospitals and stadiums ("Tata Memorial
+# Hospital"); a memorial is a sight through its kind or another word (tomb, monument).
 sight_words = [
-  "temple", "mandir", "church", "cathedral", "mosque", "masjid", "dargah", "gurdwara",
-  "monastery", "fort", "palace", "museum", "tomb", "memorial", "monument", "garden", "bagh",
-  "ghat", "lake", "falls", "cave", "shrine", "basilica", "stepwell", "baori", "ashram", "gate",
-  "mahal", "minar",
+  "temple", "mandir", "church", "chapel", "cathedral", "mosque", "masjid", "dargah",
+  "gurdwara", "monastery", "synagogue", "pagoda", "stupa", "gompa", "fort", "castle", "palace",
+  "museum", "tomb", "monument", "garden", "bagh", "ghat", "lake", "falls", "cave", "shrine",
+  "basilica", "stepwell", "baori", "ashram", "gate", "mahal", "minar",
 ]
 # Kinds (from Wikidata, config/kind_map.toml) that make a stop a sight whatever its name says.
 sight_kinds = [
@@ -33,7 +35,7 @@ sight_kinds = [
 reason = """Wikivoyage's see and do sections also hold stadiums, cinemas, colleges, clubs and \\
 offices. Wikidata cannot say they are not sights (most stops have no kind), so a clear name word \\
 decides, but only when nothing else says the stop is a place to visit. Ambiguous words (bhavan, \\
-centre, complex, research, bank, mall, academy) are left out on purpose: they name temples and museums as often \\
-as offices. A block with one non-sight stop and at least two sights left is flagged (held back \\
-until a rule or override clears it); a block left with fewer than two sights is rejected. The \\
+centre, complex, research, bank, mall, academy) are left out on purpose: they name temples \\
+and museums as often as offices. A block with non-sight stops but at least the minimum number of \\
+sights left is flagged (held back until a rule clears it); a block left with fewer is rejected. The \\
 stops are never removed or rewritten, so a wrong flag costs a held-back block, not lost data."""
