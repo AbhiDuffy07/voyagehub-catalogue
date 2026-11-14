@@ -177,7 +177,8 @@ def _report(totals: dict[str, Any], city_rows: list[list[Any]], dump_date: str, 
     ]
     for row in city_rows[:REPORT_CITIES]:
         slug, title, stops, areas, blocks, days, unblocked = row[:7]
-        lines.append(f"| {title} | {stops} | {areas} | {blocks} | {days} | {unblocked} |")
+        city = str(title).replace("|", "\\|")
+        lines.append(f"| {city} | {stops} | {areas} | {blocks} | {days} | {unblocked} |")
     lines += [
         "",
         "Hours: a stop is skipped for a slot only when its own parsed hours say it is closed; "
@@ -271,7 +272,7 @@ def run_draft_blocks(
                 unblocked_total[reason] += 1
                 unblocked_csv.append(
                     [
-                        owner.owner_slug,
+                        _safe_cell(owner.owner_slug),
                         stop.page_id,
                         stop.ordinal,
                         _safe_cell(stop.key),

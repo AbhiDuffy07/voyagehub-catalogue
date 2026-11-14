@@ -1,7 +1,7 @@
 import pytest
 
 from catalogue.blocks.areas import build_areas
-from catalogue.blocks.build import days_fillable, draft_blocks
+from catalogue.blocks.build import days_fillable, draft_blocks, is_open_in
 from catalogue.blocks.rules import load_block_rules
 from tests.blocksfixture import hours, stop
 
@@ -190,3 +190,75 @@ def test_days_fillable_needs_a_morning_and_an_afternoon_or_a_full_day(slots, exp
 def test_too_few_stops_gives_no_blocks(count):
     result = draft([stop(f"S{i}", km_north=i) for i in range(count)])
     assert result.blocks == []
+
+
+# --- hours, found in review ---------------------------------------------------------------
+
+
+def test_a_closed_stop_that_is_not_the_anchor_is_filtered_out_of_the_block():
+    anchor = stop("Anchor", kind="religious", has_photo=True)
+    closed = stop("Closed", km_north=0.1, kind="religious", hours=hours(("05:00", "07:00")))
+    fine = stop("Fine", km_north=0.2, kind="religious")
+    block = draft([anchor, closed, fine]).blocks[0]
+    assert [s.stop.name for s in block.stops] == ["Anchor", "Fine"]
+
+
+def test_a_far_block_never_holds_a_stop_closed_for_its_half_day_slot():
+    town = [stop(f"T{i}", km_north=(i % 4) * 0.1, km_east=(i // 4) * 0.1) for i in range(8)]
+    afternoon_only = stop("Late", km_north=11.0, kind="religious", hours=hours(("14:00", "17:00")))
+    friend = stop("Friend", km_north=11.2, kind="religious", has_photo=True)
+    far_blocks = [b for b in draft([*town, afternoon_only, friend]).blocks if b.day_trip]
+    for block in far_blocks:
+        window = RULES.windows["full_day" if block.slot == "full_day" else block.slot]
+        assert all(is_open_in(s.stop.hours, window) for s in block.stops)
+    assert not any(
+        b.slot == "morning" for b in far_blocks if "Late" in [s.stop.name for s in b.stops]
+    )
+
+
+def test_an_anchor_flipped_by_its_hours_is_not_flexible():
+    afternoon_only = hours(("14:00", "17:00"))
+    stops = [stop(f"S{i}", km_north=i * 0.1, hours=afternoon_only) for i in range(2)]
+    block = draft(stops).blocks[0]
+    assert block.slot == "afternoon" and block.slot_basis == "hours"
+    again = draft([stop(f"Z{i}", km_north=i * 0.1, hours=afternoon_only) for i in range(2)])
+    assert days_fillable([block, again.blocks[0]]) == 0  # two afternoons never make a day
+
+
+def test_a_flexible_block_must_be_open_in_both_halves():
+    stops = [stop("A", hours=hours(("14:00", "17:00"))), stop("B", km_north=0.1)]
+    block = draft(stops).blocks[0]
+    assert block.slot_basis != "alternate"
+
+
+def test_a_stop_too_far_for_a_day_trip_has_its_own_reason():
+    town = [stop(f"T{i}", km_north=(i % 4) * 0.1, km_east=(i // 4) * 0.1) for i in range(8)]
+    remote = [stop("Remote A", km_north=70.0), stop("Remote B", km_north=70.2)]
+    result = draft([*town, *remote])
+    assert {why for _, why in result.unblocked} == {"too_far_for_day_trip"}
+
+
+def test_paired_stops_stay_within_the_radius_of_the_first_stop():
+    # a chain of three stops 5 km apart would run 10 km; only the first pair is within 6 km
+    stops = [stop("A"), stop("B", km_north=5.0), stop("C", km_north=10.0)]
+    result = draft(stops)
+    assert [len(b.stops) for b in result.blocks] == [2]
+    assert [why for _, why in result.unblocked] == ["isolated_stop"]
+
+
+@pytest.mark.parametrize(
+    "parsed,window,expected",
+    [
+        (None, (540, 780), True),
+        ({"always_open": True}, (540, 780), True),
+        (hours(("22:00", "02:00")), (540, 780), False),  # overnight stays out of the day
+        (hours(("22:00", "02:00")), (0, 60), True),
+        (hours(("09:00", "17:00")), (780, 1020), True),
+        (hours(("05:00", "07:00")), (540, 780), False),
+        (hours(("05:00", "09:00")), (540, 780), False),  # closes exactly as the slot opens
+        (hours(("00:00", "24:00")), (540, 780), True),
+        ({"schedule": [{"days": ["mon"]}]}, (540, 780), False),  # no ranges: closed for the slot
+    ],
+)
+def test_is_open_in_cases(parsed, window, expected):
+    assert is_open_in(parsed, window) is expected

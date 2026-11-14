@@ -46,3 +46,19 @@ def test_a_duration_without_reason_is_refused(tmp_path):
     )
     with pytest.raises(PipelineError):
         load_block_rules(durations_path=bad)
+
+
+def test_a_full_day_shorter_than_a_half_day_is_refused(tmp_path):
+    text = (root_rules() / "block_rules.toml").read_text(encoding="utf-8")
+    bad = tmp_path / "r.toml"
+    bad.write_text(
+        text.replace("full_day_minutes = 420", "full_day_minutes = 100"), encoding="utf-8"
+    )
+    with pytest.raises(PipelineError, match="full_day_minutes"):
+        load_block_rules(bad)
+
+
+def root_rules():
+    from catalogue.blocks.rules import BLOCK_RULES_PATH
+
+    return BLOCK_RULES_PATH.parent

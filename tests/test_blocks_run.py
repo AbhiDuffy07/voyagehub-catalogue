@@ -165,3 +165,54 @@ def test_a_missing_manifest_names_the_job_to_run(tmp_path):
     (pho / "manifest.json").unlink()
     with pytest.raises(PipelineError, match="photo-select"):
         run((lis, enr, pho), tmp_path)
+
+
+# --- damaged and odd input, found in review -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"schedule": [{"days": ["mon"], "ranges": [["09:00"]]}]},
+        {"schedule": [{"days": ["mon"], "ranges": [["", "17:00"]]}]},
+        {"schedule": ["9AM"]},
+        {"schedule": [{"days": ["mon"], "ranges": [["25:00", "26:00"]]}]},
+        {"schedule": [{"days": ["mon"], "ranges": [["09:00", "09:00"]]}]},
+    ],
+)
+def test_malformed_hours_count_as_unknown_not_a_crash(tmp_path, bad):
+    rows = [listing_row(1, "A", hours_parsed=bad)]
+    lis, enr, pho = world(tmp_path, rows)
+    stops, _ = read_stops(lis, enr, pho, "IN", RULES)
+    assert stops[0].hours is None
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r.update(name=5),
+        lambda r: r.update(quality_flags=7),
+        lambda r: r.update(owner_page_id=None),
+        lambda r: r.update(page_id=[1]),
+    ],
+)
+def test_a_damaged_listing_row_is_one_clear_error(tmp_path, mutate):
+    row = listing_row(1, "A")
+    mutate(row)
+    lis, enr, pho = world(tmp_path, [row], facts=[])
+    with pytest.raises(PipelineError, match="listings.jsonl has a damaged row"):
+        read_stops(lis, enr, pho, "IN", RULES)
+
+
+def test_a_damaged_facts_row_is_one_clear_error(tmp_path):
+    rows = [listing_row(1, "A")]
+    lis, enr, pho = world(tmp_path, rows, facts=[{"ordinal": 1}])
+    with pytest.raises(PipelineError, match="listing_facts.jsonl has a damaged row"):
+        read_stops(lis, enr, pho, "IN", RULES)
+
+
+def test_pipes_in_a_name_do_not_break_the_report_table(tmp_path):
+    rows = [listing_row(i, f"S{i}", km_north=i * 0.2) for i in range(1, 4)]
+    rows = [{**r, "owner_title": "Odd | City"} for r in rows]
+    report = (run(world(tmp_path, rows), tmp_path).output_dir / "report.md").read_text("utf-8")
+    assert "Odd \\| City" in report

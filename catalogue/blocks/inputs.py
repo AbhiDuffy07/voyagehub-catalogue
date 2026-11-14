@@ -6,6 +6,7 @@ filled in or guessed. Error messages name files only (the logs are public).
 """
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,10 @@ def _verify(folder: Path, name: str, job: str, country_filter: str | None) -> st
     return digest
 
 
+def _whole(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _number(value: Any) -> float | None:
     try:
         number = float(value)
@@ -53,14 +58,39 @@ def _point(lat: Any, lon: Any) -> tuple[float, float] | None:
     la, lo = _number(lat), _number(lon)
     if la is None or lo is None or not -90 <= la <= 90 or not -180 <= lo <= 180:
         return None
+    if la == 0 and lo == 0:
+        return None  # null island is an empty value, not a place
     return la, lo
 
 
+_CLOCK = re.compile(r"([01]?[0-9]|2[0-4]):([0-5][0-9])")
+
+
+def _clock_ok(value: Any) -> bool:
+    match = _CLOCK.fullmatch(value) if isinstance(value, str) else None
+    return match is not None and (match.group(1) != "24" or match.group(2) == "00")
+
+
 def _real_hours(parsed: Any) -> dict[str, Any] | None:
-    """Parsed hours count as known only with a schedule (or open all day); else unknown."""
-    if isinstance(parsed, dict) and (parsed.get("always_open") or parsed.get("schedule")):
+    """Parsed hours count as known only with a well-formed schedule (or open all day); anything
+    else, including a range that cannot be read or has equal open and close, is unknown."""
+    if not isinstance(parsed, dict):
+        return None
+    if parsed.get("always_open") is True:
         return parsed
-    return None
+    schedule = parsed.get("schedule")
+    if not isinstance(schedule, list) or not schedule:
+        return None
+    for entry in schedule:
+        ranges = entry.get("ranges") if isinstance(entry, dict) else None
+        if not isinstance(ranges, list) or not ranges:
+            return None
+        for item in ranges:
+            if not (isinstance(item, list) and len(item) == 2 and all(map(_clock_ok, item))):
+                return None
+            if item[0] == item[1]:
+                return None
+    return parsed
 
 
 def input_hashes(
@@ -83,17 +113,25 @@ def read_stops(
     rules: BlockRules,
 ) -> tuple[list[Stop], dict[str, int]]:
     """The usable stops (sorted by owner, page, ordinal) and a count of the rest by reason."""
-    facts = {(r["page_id"], r["ordinal"]): r for r in _rows(enrich_folder / FACTS_FILE)}
-    with_photo = {
-        (r["page_id"], r["ordinal"])
-        for r in _rows(photos_folder / PHOTOS_FILE)
-        if r.get("subject") == "listing" and r.get("photo")
-    }
+    try:
+        facts = {(r["page_id"], r["ordinal"]): r for r in _rows(enrich_folder / FACTS_FILE)}
+    except (KeyError, TypeError):
+        raise PipelineError(f"{FACTS_FILE} has a damaged row") from None
+    try:
+        with_photo = {
+            (r["page_id"], r["ordinal"])
+            for r in _rows(photos_folder / PHOTOS_FILE)
+            if r.get("subject") == "listing" and r.get("photo")
+        }
+    except (KeyError, TypeError):
+        raise PipelineError(f"{PHOTOS_FILE} has a damaged row") from None
     stops: list[Stop] = []
     excluded: Counter = Counter()
     for row in _rows(listings_folder / LISTINGS_FILE):
         try:
             key = (row["page_id"], row["ordinal"])
+            if not all(_whole(v) for v in (*key, row["owner_page_id"])):
+                raise TypeError
             name = (row["name"] or "").strip()
             fact = facts.get(key)
             if row["kind"] not in rules.sections:
@@ -136,7 +174,7 @@ def read_stops(
                         hours=_real_hours(row.get("hours_parsed")),
                     )
                 )
-        except KeyError:
+        except (KeyError, TypeError, AttributeError, ValueError):
             raise PipelineError("listings.jsonl has a damaged row") from None
     names_at: dict[tuple, set[str]] = {}
     for s in stops:

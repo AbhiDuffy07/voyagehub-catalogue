@@ -66,9 +66,3 @@ morning = ["fort_palace", "park_nature", "viewpoint", "religious", "sight"]
 afternoon = ["museum", "market", "neighbourhood"]
 reason = """Outdoor and cool-hour sights suit the morning; museums, markets and old quarters suit \
 the afternoon. A simple default, not data."""
-
-[sort]
-# A stop comes earlier in an area (and anchors a block) when it is UNESCO, has a B6 photo, has
-# known hours, or has a known kind, in this order of weight; then by name.
-reason = """Prefer well-known stops with a photo, as the owner asked; ties break on name so a rerun \
-is identical."""

@@ -36,7 +36,12 @@ def is_open_in(hours: dict | None, window: tuple[int, int]) -> bool:
     start, end = window
     for entry in hours.get("schedule") or []:
         for opens, closes in entry.get("ranges") or []:
-            lo, hi = _minutes(opens), _minutes(closes)
+            try:
+                lo, hi = _minutes(opens), _minutes(closes)
+            except (ValueError, TypeError, AttributeError):
+                continue  # a range that cannot be read says nothing
+            if lo == hi:
+                continue
             spans = [(lo, hi)] if hi > lo else [(lo, 1440), (0, hi)]
             if any(a < end and b > start for a, b in spans):
                 return True
@@ -91,7 +96,7 @@ def _grow(
                 continue
             if (
                 radius_km is not None
-                and haversine_km(last.lat, last.lon, cand.lat, cand.lon) > radius_km
+                and haversine_km(anchor.lat, anchor.lon, cand.lat, cand.lon) > radius_km
             ):
                 continue
             if total + minutes + _visit(cand, rules)[3] > cap:
@@ -235,18 +240,32 @@ def draft_blocks(stops: list[Stop], areas: list[Area], rules: BlockRules) -> Blo
         alternate += 1
         return slot, "alternate"
 
-    def trip_slot(path, slot: str, basis: str) -> tuple[str, str]:
-        """A far block is a full day only when its visits plus both transfers need one."""
+    def all_open(path, slot: str) -> bool:
+        window = rules.windows[slot]
+        return all(is_open_in(p[0].hours, window) for p in path)
+
+    def needs_full_day(path) -> bool:
         anchor = path[0][0]
         straight = haversine_km(centre[0], centre[1], anchor.lat, anchor.lon)
         visits = sum(_visit(p[0], rules)[3] for p in path) + sum(p[1] for p in path)
-        if visits + 2 * road_minutes(straight, rules.travel) > rules.blocks.half_day_minutes:
+        return visits + 2 * road_minutes(straight, rules.travel) > rules.blocks.half_day_minutes
+
+    def fit_slot(path, slot: str, basis: str, is_far: bool) -> tuple[str, str]:
+        """The slot the finished block really fits. A far block is a full day only when its
+        visits plus both transfers need one; a half-day slot must suit every stop's known hours
+        (else the other half, else the full day); a block is flexible (`alternate`) only if it
+        is open in both halves."""
+        if is_far and needs_full_day(path):
             return "full_day", "trip"
+        if not all_open(path, slot):
+            other = _opposite(slot)
+            return (other, "hours") if all_open(path, other) else ("full_day", "trip")
+        if basis == "alternate" and not all_open(path, _opposite(slot)):
+            basis = "hours"
         return slot, basis
 
     def emit(anchor, path, slot, basis, is_far, flags=()):
-        if is_far:
-            slot, basis = trip_slot(path, slot, basis)
+        slot, basis = fit_slot(path, slot, basis, is_far)
         block = _finish(anchor, path, slot, is_far, centre, area_of, rules)
         block.slot_basis = basis
         block.flags.extend(flags)
@@ -266,6 +285,14 @@ def draft_blocks(stops: list[Stop], areas: list[Area], rules: BlockRules) -> Blo
             pool = sorted((s for a in zones[area.number] for s in a.members), key=priority_key)
             while pool:
                 anchor = pool[0]
+                if far_cap(anchor) < _visit(anchor, rules)[3]:
+                    pool.pop(0)
+                    result.unblocked.append((anchor, "too_far_for_day_trip"))
+                    continue
+                if not is_open_in(anchor.hours, rules.windows["full_day"]):
+                    pool.pop(0)
+                    result.unblocked.append((anchor, "closed_in_slot"))
+                    continue
                 path = _grow(
                     anchor, pool, "full_day", far_cap(anchor), rules, only_hops_within_walk=True
                 )
@@ -292,7 +319,7 @@ def draft_blocks(stops: list[Stop], areas: list[Area], rules: BlockRules) -> Blo
             if made == 0:
                 slot, basis = pick_slot(anchor)
                 if not is_open_in(anchor.hours, rules.windows[slot]):
-                    slot = _opposite(slot)
+                    slot, basis = _opposite(slot), "hours"
             else:
                 slot, basis = _opposite(first_slot), "opposite"
             if not is_open_in(anchor.hours, rules.windows[slot]):
@@ -323,9 +350,14 @@ def draft_blocks(stops: list[Stop], areas: list[Area], rules: BlockRules) -> Blo
         is_far = haversine_km(anchor.lat, anchor.lon, *centre) > rules.blocks.day_trip_km
         slot, basis = pick_slot(anchor)
         window = "full_day" if is_far else slot
-        if not is_far and not is_open_in(anchor.hours, rules.windows[slot]):
-            result.unblocked.append((anchor, "closed_in_slot"))
+        if is_far and far_cap(anchor) < _visit(anchor, rules)[3]:
+            result.unblocked.append((anchor, "too_far_for_day_trip"))
             continue
+        if not is_open_in(anchor.hours, rules.windows[window]):
+            if is_far or not is_open_in(anchor.hours, rules.windows[_opposite(slot)]):
+                result.unblocked.append((anchor, "closed_in_slot"))
+                continue
+            slot, basis, window = _opposite(slot), "hours", _opposite(slot)
         cap = far_cap(anchor) if is_far else float(rules.blocks.half_day_minutes)
         path = _grow(
             anchor,

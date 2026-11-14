@@ -164,6 +164,8 @@ def load_block_rules(
         default_durations=defaults,
         duration_reasons=duration_reasons,
     )
+    if rules.blocks.full_day_minutes < rules.blocks.half_day_minutes:
+        raise PipelineError(f"{source}: full_day_minutes must be at least half_day_minutes")
     if rules.blocks.min_stops < 2 or rules.blocks.min_stops > rules.blocks.max_stops:
         raise PipelineError(f"{source}: stops per block need 2 <= min_stops <= max_stops")
     if set(rules.morning_kinds) & set(rules.afternoon_kinds):
