@@ -33,6 +33,7 @@ from catalogue.blocks.inputs import (
     _read_slugs,
     _verify,
     _verify_articles,
+    _whole,
 )
 from catalogue.discover.output import write_manifest, write_text
 from catalogue.enrich.inputs import _rows, _sha256
@@ -95,7 +96,7 @@ def _verify_timezones(folder: Path, country_filter: str | None) -> str:
     """The time zones of a country run may come from the world run (country_filter null)."""
     manifest_path = folder / "manifest.json"
     if not manifest_path.is_file():
-        raise PipelineError(f"manifest.json not found in {folder}; run derive-timezone first")
+        raise PipelineError("manifest.json of derive-timezone not found; run derive-timezone first")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         recorded_country = manifest["country_filter"]
@@ -109,11 +110,23 @@ def _verify_timezones(folder: Path, country_filter: str | None) -> str:
         )
     path = folder / TIMEZONES_FILE
     if not path.is_file():
-        raise PipelineError(f"{TIMEZONES_FILE} not found in {folder}")
+        raise PipelineError(f"{TIMEZONES_FILE} not found; run derive-timezone first")
     digest = _sha256(path)
     if digest != recorded:
         raise PipelineError(f"{TIMEZONES_FILE} does not match the derive-timezone manifest")
     return digest
+
+
+def _same_dump(folder: Path, job: str, dump_date: str) -> None:
+    """Every input must come from the dump being assessed, not an older one."""
+    if not (folder / "manifest.json").is_file():
+        return  # the file check that follows says which job to run first
+    try:
+        recorded = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))["dump_date"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise PipelineError(f"the {job} manifest.json is damaged; run {job} again") from None
+    if recorded != dump_date:
+        raise PipelineError(f"{job} was run for another dump; use the same --dump-date")
 
 
 def _json_manifest(folder: Path, job: str) -> dict[str, Any]:
@@ -123,15 +136,21 @@ def _json_manifest(folder: Path, job: str) -> dict[str, Any]:
         raise PipelineError(f"the {job} manifest.json is damaged; run {job} again") from None
 
 
+def _state_entry(value: Any) -> CityState:
+    published, failed = value["published"], value["failed_runs"]
+    if not isinstance(published, bool) or not _whole(failed) or failed < 0:
+        raise TypeError
+    return CityState(published, failed)
+
+
 def _read_previous(folder: Path, country_filter: str | None) -> dict[int, CityState]:
     path = folder / STATE_FILE
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
+        if document["schema_version"] != SCHEMA_VERSION:
+            raise ValueError
         recorded_country = document["country_filter"]
-        cities = {
-            int(key): CityState(bool(value["published"]), int(value["failed_runs"]))
-            for key, value in document["cities"].items()
-        }
+        cities = {int(key): _state_entry(value) for key, value in document["cities"].items()}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         raise PipelineError(f"{STATE_FILE} in the previous folder is missing or damaged") from None
     if recorded_country != country_filter:
@@ -211,7 +230,10 @@ def _report(totals: dict[str, Any], dump_date: str, rules: ReadinessRules) -> st
         f"- ready but not published, no slug in data/slugs.json: {t['blocked_no_slug']}",
         "  (the static page needs a slug; slugs are assigned only in a reviewed discover wave, "
         "so these wait for one)",
-        f"- published earlier but not in this run: {t['missing_from_run']}",
+        f"- published earlier but not in this run (counted above as failed runs): "
+        f"{t['missing_from_run']}",
+        f"- published without a slug: {t['published_without_slug']} (a page keyed by slug "
+        "cannot be built for these until a slug is assigned)",
         "",
         "Not required, by owner ruling (the design asked for them): Wikivoyage status usable, "
         "guide or star (outline cities may be ready), at least ten mappable sights, and a "
@@ -241,6 +263,15 @@ def run_readiness(
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_readiness_rules()
     country_filter = country_iso.upper() if country_iso else None
+    for folder, job in (
+        (listings_folder, "fetch-listings"),
+        (summaries_folder, "wikipedia-summary"),
+        (photos_folder, "photo-select"),
+        (blocks_folder, "draft-blocks"),
+        (checks_folder, "auto-check"),
+        (timezones_folder, "derive-timezone"),
+    ):
+        _same_dump(folder, job, dump_date)
     hashes = {
         LISTINGS_FILE: _verify(listings_folder, LISTINGS_FILE, "fetch-listings", country_filter),
         ARTICLES_FILE: _verify_articles(discover_folder, listings_folder),
@@ -254,14 +285,26 @@ def run_readiness(
     }
     try:
         blocks_rules_version = _json_manifest(blocks_folder, "draft-blocks")["rules_version"]
-        checked_against = _json_manifest(checks_folder, "auto-check")["blocks_rules_version"]
+        checks_manifest = _json_manifest(checks_folder, "auto-check")
+        checked_against = checks_manifest["blocks_rules_version"]
+        checked_blocks_hash = checks_manifest["inputs_sha256"][BLOCKS_FILE]
     except (KeyError, TypeError):
         raise PipelineError("a manifest.json is damaged; run the job again") from None
     if blocks_rules_version != checked_against:
         raise PipelineError(
             "auto-check output was built from other draft-blocks rules; run auto-check again"
         )
+    if checked_blocks_hash != hashes[BLOCKS_FILE]:
+        raise PipelineError(
+            "auto-check output was built from other draft blocks than these; run auto-check again"
+        )
     previous = _read_previous(previous_folder, country_filter) if previous_folder else {}
+    if previous_folder:
+        hashes["previous_state.json"] = _sha256(previous_folder / STATE_FILE)
+    try:
+        hashes["slugs.json"] = _sha256(slugs_path)
+    except OSError:
+        raise PipelineError("slugs.json could not be read; it is the slug registry") from None
 
     try:
         articles = {
@@ -393,9 +436,11 @@ def run_readiness(
             }
             results.append(row)
             out.write(row)
+    published_without_slug = sum(1 for r in results if r["published"] and r["slug"] is None)
     missing = {pid: s for pid, s in previous.items() if pid not in cities and s.published}
     for pid, old in missing.items():
-        new_state[pid], _ = decide_publication(old, ready=False, rules=rules)
+        new_state[pid], action = decide_publication(old, ready=False, rules=rules)
+        actions[action] += 1
     state_document = {
         "schema_version": SCHEMA_VERSION,
         "country_filter": country_filter,
@@ -423,6 +468,7 @@ def run_readiness(
         "unpublish": actions["unpublish"],
         "blocked_no_slug": actions["blocked_no_slug"],
         "missing_from_run": len(missing),
+        "published_without_slug": published_without_slug,
         "photos_of_non_places": unowned_photos,
     }
     write_text(

@@ -30,7 +30,10 @@ def jsonl(path: Path, rows) -> str:
 
 def manifest(folder: Path, files: dict[str, str], country="IN", **extra) -> None:
     (folder / "manifest.json").write_text(
-        json.dumps({"country_filter": country, "outputs_sha256": files, **extra}), encoding="utf-8"
+        json.dumps(
+            {"country_filter": country, "dump_date": "20261101", "outputs_sha256": files, **extra}
+        ),
+        encoding="utf-8",
     )
 
 
@@ -156,6 +159,7 @@ def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2
         chk,
         {"block_checks.jsonl": jsonl(chk / "block_checks.jsonl", checks)},
         blocks_rules_version=checks_rules,
+        inputs_sha256={"day_blocks.jsonl": sha(blk / "day_blocks.jsonl")},
     )
 
     slugs = root / "slugs.json"

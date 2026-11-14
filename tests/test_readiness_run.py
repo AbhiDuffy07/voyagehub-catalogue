@@ -4,8 +4,8 @@ import json
 import pytest
 
 from catalogue.errors import PipelineError
-from catalogue.readiness.run import run_readiness
-from tests.readinessfixture import TODAY, build, rows, run
+from catalogue.readiness.run import _verify_timezones, run_readiness
+from tests.readinessfixture import TODAY, build, rows, run, sha
 
 
 @pytest.fixture
@@ -202,8 +202,6 @@ def test_a_damaged_row_is_one_clear_error_naming_the_file_only(tmp_path):
     path.write_text(json.dumps({"block_id": "x"}) + "\n", encoding="utf-8")
     manifest_path = kwargs["checks_folder"] / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    from tests.readinessfixture import sha
-
     data["outputs_sha256"]["block_checks.jsonl"] = sha(path)
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(PipelineError, match="block_checks.jsonl"):
@@ -214,3 +212,106 @@ def test_the_run_date_is_the_generation_date(world):
     result, _ = world
     manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["generated_on"] == TODAY.isoformat()
+
+
+def test_checks_built_from_other_blocks_than_the_ones_read_are_refused(tmp_path):
+    kwargs = build(tmp_path)
+    path = kwargs["blocks_folder"] / "day_blocks.jsonl"
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    manifest_path = kwargs["blocks_folder"] / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data["outputs_sha256"]["day_blocks.jsonl"] = sha(path)  # draft-blocks was run again
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(PipelineError, match="run auto-check again"):
+        run_readiness(**kwargs)
+
+
+def test_an_input_from_another_dump_is_refused(tmp_path):
+    kwargs = build(tmp_path)
+    manifest_path = kwargs["summaries_folder"] / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data["dump_date"] = "20260801"
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(PipelineError, match="wikipedia-summary.*another dump"):
+        run_readiness(**kwargs)
+
+
+def test_the_manifest_records_the_state_and_slug_inputs(tmp_path):
+    first, _ = run(tmp_path, tag="1")
+    second, _ = run(tmp_path, tag="2", previous_folder=first.output_dir)
+    manifest = json.loads((second.output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["inputs_sha256"]["previous_state.json"] == sha(first.output_dir / "state.json")
+    assert len(manifest["inputs_sha256"]["slugs.json"]) == 64
+
+
+def test_a_city_that_left_the_run_is_counted_in_the_unpublish_totals(tmp_path):
+    first, _ = run(tmp_path, tag="1")
+    state_path = first.output_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["cities"]["99"] = {"published": True, "failed_runs": 1}
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    second, _ = run(tmp_path, tag="2", previous_folder=first.output_dir)
+    assert second.totals["unpublish"] == 1 and second.totals["missing_from_run"] == 1
+    assert "unpublished after 2 failed runs: 1" in (second.output_dir / "report.md").read_text(
+        "utf-8"
+    )
+
+
+def test_a_published_city_that_lost_its_slug_stays_published_and_is_flagged(tmp_path):
+    first, _ = run(tmp_path, tag="1")
+    kwargs = build(tmp_path, tag="2")
+    registry = json.loads(kwargs["slugs_path"].read_text(encoding="utf-8"))
+    del registry["entries"]["1"]
+    kwargs["slugs_path"].write_text(json.dumps(registry), encoding="utf-8")
+    second = run_readiness(**{**kwargs, "previous_folder": first.output_dir})
+    jaipur = rows(second)[1]
+    assert (jaipur["publish_action"], jaipur["published"], jaipur["slug"]) == ("keep", True, None)
+    assert second.totals["published_without_slug"] == 1
+    assert "published without a slug: 1" in (second.output_dir / "report.md").read_text("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("recorded", "wanted", "ok"),
+    [(None, "IN", True), ("IN", "IN", True), ("BT", "IN", False), ("IN", None, False)],
+)
+def test_the_time_zone_folder_may_be_the_world_run_but_never_another_country(
+    tmp_path, recorded, wanted, ok
+):
+    kwargs = build(tmp_path)
+    folder = kwargs["timezones_folder"]
+    data = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    data["country_filter"] = recorded
+    (folder / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    if ok:
+        assert len(_verify_timezones(folder, wanted)) == 64
+    else:
+        with pytest.raises(PipelineError, match="different country filter"):
+            _verify_timezones(folder, wanted)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"published": "false", "failed_runs": 0},
+        {"published": True, "failed_runs": -1},
+        {"published": True, "failed_runs": "1"},
+    ],
+)
+def test_a_state_entry_with_the_wrong_types_is_refused(tmp_path, bad):
+    first, _ = run(tmp_path, tag="1")
+    state_path = first.output_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["cities"]["1"] = bad
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    with pytest.raises(PipelineError, match="state.json"):
+        run(tmp_path, tag="2", previous_folder=first.output_dir)
+
+
+def test_a_previous_state_with_another_schema_version_is_refused(tmp_path):
+    first, _ = run(tmp_path, tag="1")
+    state_path = first.output_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["schema_version"] = 99
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    with pytest.raises(PipelineError, match="state.json"):
+        run(tmp_path, tag="2", previous_folder=first.output_dir)
