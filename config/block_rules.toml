@@ -1,0 +1,85 @@
+# Rules for areas and draft day blocks (B8). Nothing here is country-specific. Change a value only
+# together with its reason, and bump rules_version. B7 (routing) is deferred, so every travel figure
+# is a straight-line distance times a detour factor and is always labelled "estimate".
+
+rules_version = 1
+
+[eligible]
+# Only listings under these kinds of owner page are planned (a city). Parks, regions and rural
+# areas are too large to walk, and are counted, not blocked.
+owner_types = ["city"]
+sections = ["see", "do"]
+# A stop with any of these flags is not used: its coordinates are disputed or unusable.
+blocked_flags = ["wikidata_coord_disagrees", "own_geo_invalid", "via_link_unverified"]
+# This many different places in one city with exactly the same point means the point was copied
+# (three Varanasi temples on the India run), so none of them is trusted.
+shared_coordinate_names = 3
+reason = """Blocks are for see/do stops with a trusted point in a city. A coordinate two sources \
+disagree on, or one that is invalid or came through an unverified link, is never guessed; the stop \
+is counted under its reason and left out."""
+
+[subarticles]
+# An article that is a sight in its own right (the Taj Mahal is the article "Agra/Taj Mahal", not a
+# see listing) becomes a stop under its parent city. "Is a sight" is decided by Wikidata (the kind
+# `enrich-wikidata` gave it), never by the Wikivoyage article type: Agra/Taj Mahal is typed
+# `district`. Its own article coordinates, summary and photo are used.
+kinds = ["sight", "museum", "religious", "fort_palace", "park_nature", "market", "viewpoint", "activity"]
+# Article types that are never a stop: places that are destinations themselves, groupings, guides.
+skip_types = [
+  "city", "region", "ruralarea", "itinerary", "topic", "diveguide", "phrasebook", "airport",
+  "station", "country", "continent", "event",
+]
+parent_types = ["city"]
+reason = """Only a sub-article directly under a city counts, and only when Wikidata says it is an \
+attraction. A neighbourhood or a district with no attraction kind, a region, a village or town \
+of its own, an itinerary or a travel topic is skipped and counted. A sub-article that repeats a \
+listing of the same city (same Wikidata item or same name) is not added twice."""
+
+[travel]
+detour_factor = 1.3
+walk_kmh = 4.5
+road_kmh = 20.0
+max_walk_hop_min = 30
+reason = """Design section 7: straight-line distance x 1.3 at 4.5 km/h on foot. The road speed is \
+an assumption for a town taxi or auto-rickshaw with no traffic data (B7 would replace it); it only \
+applies to a road hop and day-trip transfer, and is labelled estimate everywhere."""
+
+[areas]
+walk_radius_km = 1.2
+reason = """Design: a stop joins an area when it is about 1.2 km on foot from the area centre \
+(straight line x detour factor; so about 0.92 km as the crow flies)."""
+
+[blocks]
+min_stops = 2
+max_stops = 4
+# Stops this close together are often one complex (Agra Fort has about fifteen listings), so an
+# area gets one morning and one afternoon block at most; the rest are reported.
+max_blocks_per_area = 2
+half_day_minutes = 240
+full_day_minutes = 420
+# A day-trip area is one whose centre is this far (straight line) from the city's median stop.
+# Far areas within pair_radius_km of each other are one zone and share ONE day-trip block.
+day_trip_km = 8.0
+# An isolated stop may share a block with the nearest other left-over stop within this distance
+# (straight line); the hop between them is a road hop.
+pair_radius_km = 6.0
+reason = """Half a day is about 4 hours of visits plus walking; 2 to 4 stops fit it. A far area \
+(Amber from Jaipur) is a day-trip block with a road transfer (full day only if the visit plus the transfers need it). A lone stop is paired with a \
+neighbour only if close enough, else it is reported as isolated, never given a one-stop block."""
+
+[hours]
+# The window a slot covers, as clock minutes from midnight. A stop whose parsed hours leave it
+# closed for the whole window on every day is not put in that slot. Unknown hours never exclude.
+morning = [540, 780]
+afternoon = [780, 1020]
+full_day = [540, 1020]
+reason = """Used only to skip a stop whose own parsed hours say it is closed for the slot; no slot \
+or time is ever inferred from hours, and a stop with unknown hours is allowed and counted."""
+
+[slots]
+# The slot of a block comes from the kind of its first stop. A kind not listed alternates
+# morning/afternoon inside its area. There are no evening blocks in B8.
+morning = ["fort_palace", "park_nature", "viewpoint", "religious", "sight"]
+afternoon = ["museum", "market", "neighbourhood"]
+reason = """Outdoor and cool-hour sights suit the morning; museums, markets and old quarters suit \
+the afternoon. A simple default, not data."""

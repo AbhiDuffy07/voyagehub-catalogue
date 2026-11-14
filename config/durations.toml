@@ -1,0 +1,61 @@
+# How long a visit to one stop takes, in minutes (min and max), by place kind (config/kind_map.toml).
+# These are ESTIMATES, not measured data: the first three are the design's own examples (palace
+# 90-120, museum 60-90, temple 30-45); the rest are the author's round numbers. A stop whose kind is
+# unknown (about two in three on the India run) uses the default for its section and is stored with
+# `duration_basis = "default"`. Nothing here is country-specific. Change a value only together with
+# its reason, and bump rules_version in config/block_rules.toml.
+
+[kinds.fort_palace]
+min = 90
+max = 120
+reason = "Design example (palace 90-120 min); forts have similar courtyards and walks. Estimate."
+
+[kinds.museum]
+min = 60
+max = 90
+reason = "Design example (museum 60-90 min). Estimate."
+
+[kinds.religious]
+min = 30
+max = 45
+reason = "Design example (temple 30-45 min). Estimate."
+
+[kinds.park_nature]
+min = 60
+max = 90
+reason = "A garden or park is a stroll, not a quick stop. Estimate."
+
+[kinds.sight]
+min = 30
+max = 60
+reason = "A monument or viewpoint-like sight: a look and photos. Estimate."
+
+[kinds.market]
+min = 45
+max = 60
+reason = "A browse and a snack. Estimate."
+
+[kinds.viewpoint]
+min = 20
+max = 30
+reason = "A look and photos. Estimate."
+
+[kinds.neighbourhood]
+min = 45
+max = 60
+reason = "A walk through an old quarter. Estimate."
+
+[kinds.activity]
+min = 60
+max = 120
+reason = "A named activity (show, ride, class) takes a session. Estimate."
+
+[defaults.see]
+min = 30
+max = 60
+reason = "A see listing with no known kind: a short visit. Estimate; the stop is flagged as default."
+
+[defaults.do]
+min = 60
+max = 90
+reason = "A do listing with no known kind: an activity takes longer than a look. Estimate; the stop is flagged as default."
