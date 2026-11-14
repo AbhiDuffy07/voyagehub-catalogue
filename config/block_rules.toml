@@ -2,7 +2,7 @@
 # together with its reason, and bump rules_version. B7 (routing) is deferred, so every travel figure
 # is a straight-line distance times a detour factor and is always labelled "estimate".
 
-rules_version = 1
+rules_version = 2
 
 [eligible]
 # Only listings under these kinds of owner page are planned (a city). Parks, regions and rural

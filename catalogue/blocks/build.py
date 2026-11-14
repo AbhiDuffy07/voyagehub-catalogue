@@ -54,7 +54,7 @@ def _minutes(clock: str) -> int:
 
 
 def _visit(stop: Stop, rules: BlockRules) -> tuple[int, int, str, int]:
-    low, high, basis = rules.duration(stop.kind, stop.section)
+    low, high, basis = rules.duration(stop.kind, stop.section, stop.unesco)
     return low, high, basis, round((low + high) / 2)
 
 

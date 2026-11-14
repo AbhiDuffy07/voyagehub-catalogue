@@ -8,7 +8,7 @@ RULES = load_block_rules()
 
 
 def test_committed_rules_load_with_version_and_reasons():
-    assert RULES.version == 1
+    assert RULES.version == 2
     assert RULES.travel.detour_factor == 1.3 and RULES.travel.walk_kmh == 4.5
     assert RULES.areas.walk_radius_km == 1.2
     assert (RULES.blocks.min_stops, RULES.blocks.max_stops) == (2, 4)
@@ -69,3 +69,24 @@ def test_subarticle_rules_load_with_a_reason():
     assert "sight" in sub.kinds and "neighbourhood" not in sub.kinds
     assert {"region", "itinerary", "topic", "city"} <= sub.skip_types
     assert sub.parent_types == ("city",) and RULES.reasons["subarticles"].strip()
+
+
+def test_unesco_sites_have_a_longer_labelled_estimate_with_a_reason():
+    low, high, basis = RULES.duration("sight", "see", unesco=True)
+    assert basis == "unesco" and (low, high) == RULES.unesco_duration
+    assert low > RULES.duration("sight", "see")[1]
+    assert low >= RULES.duration("fort_palace", "see")[1] > 0
+    assert high > RULES.duration("fort_palace", "see")[1]
+    assert RULES.duration_reasons["unesco"].strip()
+    assert RULES.duration("sight", "see", unesco=False)[2] == "kind"
+
+
+def test_a_durations_file_without_the_unesco_table_is_refused(tmp_path):
+    from catalogue.blocks.rules import DURATIONS_PATH
+
+    text = DURATIONS_PATH.read_text(encoding="utf-8")
+    cut = text.index("\n[unesco]\n")
+    bad = tmp_path / "d.toml"
+    bad.write_text(text[:cut] + "\n" + text[text.index("[defaults.see]") :], encoding="utf-8")
+    with pytest.raises(PipelineError, match="unesco"):
+        load_block_rules(durations_path=bad)

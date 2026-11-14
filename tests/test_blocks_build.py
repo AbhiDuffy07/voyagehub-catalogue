@@ -262,3 +262,20 @@ def test_paired_stops_stay_within_the_radius_of_the_first_stop():
 )
 def test_is_open_in_cases(parsed, window, expected):
     assert is_open_in(parsed, window) is expected
+
+
+# --- UNESCO sites take longer (B10) ---------------------------------------------------------
+
+
+def test_a_unesco_stop_has_the_longer_estimate_and_says_so():
+    stops = [stop("Taj", unesco=True, kind="sight"), stop("Next", km_north=0.2)]
+    first = draft(stops).blocks[0].stops[0]
+    assert first.duration_basis == "unesco"
+    assert (first.minutes_min, first.minutes_max) == RULES.unesco_duration
+
+
+def test_a_long_unesco_visit_limits_how_many_stops_fit_the_half_day():
+    stops = [stop("Taj", unesco=True)] + [stop(f"S{i}", km_north=0.1 * (i + 1)) for i in range(3)]
+    block = draft(stops).blocks[0]
+    assert block.stops[0].stop.name == "Taj" and len(block.stops) < 4
+    assert block.minutes <= RULES.blocks.half_day_minutes

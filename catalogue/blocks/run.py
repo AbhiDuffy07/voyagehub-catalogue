@@ -105,6 +105,7 @@ def _stop_rows(b: Block) -> list[dict[str, Any]]:
             "lat": s.stop.lat,
             "long": s.stop.lon,
             "kind": s.stop.kind,
+            "unesco": s.stop.unesco,
             "minutes_min": s.minutes_min,
             "minutes_max": s.minutes_max,
             "duration_basis": s.duration_basis,

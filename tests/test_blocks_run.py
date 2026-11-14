@@ -119,7 +119,7 @@ def test_end_to_end_files_totals_and_determinism(tmp_path):
     first = run(folders, tmp_path)
     folder = first.output_dir
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["rules_version"] == 1 and manifest["country_filter"] == "IN"
+    assert manifest["rules_version"] == 2 and manifest["country_filter"] == "IN"
     names = {
         "areas.jsonl",
         "area_travel.jsonl",
@@ -135,7 +135,7 @@ def test_end_to_end_files_totals_and_determinism(tmp_path):
         assert sha(folder / name) == digest
     blocks = [json.loads(x) for x in (folder / "day_blocks.jsonl").read_text("utf-8").splitlines()]
     assert blocks and all(b["status"] == "draft" and b["method"] == "estimate" for b in blocks)
-    assert all(b["rules_version"] == 1 and b["owner_slug"] in {"jaipur", "agra"} for b in blocks)
+    assert all(b["rules_version"] == 2 and b["owner_slug"] in {"jaipur", "agra"} for b in blocks)
     before = {n: (folder / n).read_bytes() for n in names}
     second = run(folders, tmp_path)
     assert {n: (second.output_dir / n).read_bytes() for n in names} == before
@@ -363,3 +363,13 @@ def test_a_missing_summaries_manifest_names_the_job_to_run(tmp_path):
     (folders[0].parent / "summaries" / "manifest.json").unlink()
     with pytest.raises(PipelineError, match="wikipedia-summary"):
         run(folders, tmp_path)
+
+
+def test_block_stop_rows_carry_the_unesco_flag_and_basis(tmp_path):
+    rows = city_rows(3)
+    facts = [fact_row(rows[0], unesco=True), fact_row(rows[1]), fact_row(rows[2])]
+    out = run(world(tmp_path, rows, facts), tmp_path).output_dir
+    stops = [json.loads(x) for x in (out / "day_block_stops.jsonl").read_text("utf-8").splitlines()]
+    unesco = [s for s in stops if s["unesco"]]
+    assert len(unesco) == 1 and unesco[0]["duration_basis"] == "unesco"
+    assert all(s["duration_basis"] == "default" for s in stops if not s["unesco"])
