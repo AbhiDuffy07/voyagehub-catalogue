@@ -19,12 +19,15 @@ ceremony") only costs one candidate: the next one is chosen, or the subject is f
 wider than 2.5:1 do not fit a card and are dropped (design section 5)."""
 
 [gate]
-min_long_side = 1024
+min_long_side = 640
 hero_long_side = 2000
-reason = """Owner ruling 2026-11-13: the long side must be at least 1,024 px; portrait is allowed \\
+reason = """Owner ruling 2026-11-14: the long side must be at least 640 px; portrait is allowed \\
 (the cards are tall and the app crops). A hero-quality photo has a long side of at least 2,000 px \\
 (design section 5; the readiness rule counts them). A candidate below the minimum is never chosen \\
-even when it is the only one: the subject is flagged and the app shows the city photo."""
+even when it is the only one: the subject is flagged and the app shows the city photo. 1,024 px was \
+tried first and removed 13.4% of covered India subjects (over the 5% line); 640 px removes 4.2%. Ten \
+selected photos of 640-1,023 px were viewed at card size and all were sharp enough (a hazy lake and a \
+collage were content problems, not size), so 800 px was not needed."""
 
 [category]
 # A candidate that comes ONLY from the item's Commons category (not its own P18 image) must share a

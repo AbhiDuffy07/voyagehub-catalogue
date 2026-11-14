@@ -25,7 +25,7 @@ CANDIDATES = [
     cr(1, "Jaipur F.jpg", sources=("commons_category",), marks=[FEATURED]),  # lower tier than P18
     cr(2, "Agra tall.jpg", width=1400, height=2100),  # portrait: passes with a flag
     cr(3, "Delhi map.jpg"),  # dropped by name
-    cr(4, "Pune small.jpg", width=900, height=600),  # below the gate
+    cr(4, "Pune small.jpg", width=600, height=400),  # below the gate
     cr(5, "Goa.jpg", usable=False, flags=["licence_not_allowed"]),
     cr(
         1,
@@ -155,7 +155,7 @@ def test_gate_cost_is_reported_with_counts(folders, tmp_path):
     # is the one the gate removes.
     assert gate == {"covered": 6, "lost": 1, "percent": 16.7, "over_limit": True}
     lost = list(csv.DictReader((result.output_dir / "lost_to_gate.csv").open(encoding="utf-8")))
-    assert [(r["page_id"], r["best_long_side"]) for r in lost] == [("4", "900")]
+    assert [(r["page_id"], r["best_long_side"]) for r in lost] == [("4", "600")]
     report = (result.output_dir / "report.md").read_text("utf-8")
     assert report.splitlines()[2].startswith("**WARNING")
     assert "not frozen" in report
@@ -192,7 +192,7 @@ def test_an_override_file_is_never_chosen(folders, tmp_path):
 def test_spot_check_sample_is_seeded_and_deterministic(tmp_path):
     destinations = [dest(n, "Place") for n in range(1, 61)]
     candidates = [
-        cr(n, f"P{n}.jpg", width=1100 + 20 * n, height=800)
+        cr(n, f"P{n}.jpg", width=640 + 20 * n, height=480)
         if n % 3
         else cr(n, f"Place Q{n}.jpg", sources=("commons_category",), marks=["Quality images"])
         for n in range(1, 61)

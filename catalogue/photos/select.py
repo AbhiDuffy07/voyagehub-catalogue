@@ -4,7 +4,7 @@ small files they load: `config/photo_select.toml` and `overrides/rejected_photos
 Order of choice (owner, 2026-11-12/13): the Wikidata P18 image (preferred rank first), then
 Featured, Quality and Valued files, then everything else. Candidates are first dropped (rejected by
 override, not a photo type, a map/flag/logo by file name, a panorama) and then gated (long side at
-least 1,024 px; portrait allowed). Inside a tier the score ranks by size and shape, with a stable
+least 640 px; portrait allowed). Inside a tier the score ranks by size and shape, with a stable
 tie-break on the file name. A subject with no choosable candidate gets a flag and no photo; nothing
 is guessed.
 """

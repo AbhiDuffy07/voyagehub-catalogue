@@ -45,7 +45,7 @@ def pick(rows, rejected=frozenset(), words=None):
 
 def test_committed_rules_load_with_the_owner_numbers():
     assert RULES.version >= 1
-    assert RULES.min_long_side == 1024
+    assert RULES.min_long_side == 640
     assert RULES.hero_long_side == 2000
     assert RULES.max_aspect == 2.5
 
@@ -183,11 +183,11 @@ def test_the_same_image_under_two_names_is_one_candidate():
 @pytest.mark.parametrize(
     "width,height,passes",
     [
-        (1024, 700, True),
-        (1023, 700, False),
-        (700, 1024, True),
-        (700, 1023, False),
-        (1024, 1024, True),
+        (640, 480, True),
+        (639, 480, False),
+        (480, 640, True),
+        (480, 639, False),
+        (640, 640, True),
     ],
 )
 def test_long_side_gate_edges(width, height, passes):
@@ -215,7 +215,7 @@ def test_hero_quality_is_two_thousand_on_the_long_side():
 
 
 def test_a_small_candidate_loses_to_a_big_one_even_in_a_lower_tier():
-    small_p18 = cand("S.jpg", width=900, height=600)
+    small_p18 = cand("S.jpg", width=600, height=400)
     big_quality = cand("Q.jpg", sources=("commons_category",), marks=["Quality images"])
     assert pick([small_p18, big_quality]).chosen["commons_file"] == "Q.jpg"
 
