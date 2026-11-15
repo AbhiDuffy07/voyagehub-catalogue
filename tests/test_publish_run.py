@@ -364,3 +364,52 @@ def test_an_old_http_licence_link_is_a_valid_credit():
     assert photo is not None and photo["credit"]["licence_url"] == licence
     bad = {"photo": {**publishfixture.CREDIT_PHOTO, "licence_url": "javascript:alert(1)"}}
     assert b.photo_of(bad, b.Counter()) is None
+
+
+def test_a_city_without_its_own_hero_uses_a_hero_quality_place_photo(tmp_path):
+    result, _ = _build(tmp_path)
+    agra = _json(result.site_dir / V1 / "cities" / "agra.json")
+    assert agra["hero"]["caption"] == "Tomb 1"  # the one hero-quality photo among its places
+    assert agra["hero"]["credit"]["author"] == "Gerd Eichmann"
+    assert agra["hero"]["credit"]["licence"] == "CC BY-SA 4.0"
+    index = {c["slug"]: c for c in _json(result.site_dir / V1 / "index.json")["cities"]}
+    assert index["agra"]["hero"]["caption"] == "Tomb 1"
+    jaipur = _json(result.site_dir / V1 / "cities" / "jaipur.json")
+    assert jaipur["hero"]["caption"] is None  # its own article photo wins
+
+
+def test_the_fallback_hero_is_the_best_scoring_credited_hero_quality_photo():
+    from catalogue.publish import build as b
+
+    def photo(name, score, hero=True, licence="CC BY-SA 4.0"):
+        return {
+            "hero_quality": hero,
+            "score": score,
+            "photo": {**publishfixture.CREDIT_PHOTO, "licence_name": licence, "commons_file": name},
+        }
+
+    def place(ordinal, name):
+        return {"page_id": 7, "ordinal": ordinal, "name": name, "listing_key": f"see:{ordinal}"}
+
+    rows = [place(1, "Low"), place(2, "Best"), place(3, "Plain"), place(4, "Unlicensed")]
+    up = b.Upstream(
+        place_listings={7: rows},
+        photos={
+            ("listing", 7, 1): photo("a.jpg", 1.0),
+            ("listing", 7, 2): photo("b.jpg", 3.0),
+            ("listing", 7, 3): photo("c.jpg", 9.0, hero=False),
+            ("listing", 7, 4): photo("d.jpg", 9.5, licence=""),
+        },
+        summaries={},
+        timezones={},
+        blocks={},
+        stops={},
+        block_costs={},
+        days={},
+        bands={},
+    )
+    hero = b.fallback_hero(7, up)
+    assert hero["caption"] == "Best"
+    assert up.counts["photos_left_out_no_credit"] == 0  # looking for a hero never counts photos
+    up.place_listings[7] = [place(3, "Plain"), place(4, "Unlicensed")]
+    assert b.fallback_hero(7, up) is None  # nothing hero-quality with a credit: stays empty

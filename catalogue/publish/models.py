@@ -28,6 +28,7 @@ class Photo(_Model):
     width: int | None
     height: int | None
     credit: Credit
+    caption: str | None = None  # a city hero taken from a place names that place
 
 
 class Text(_Model):

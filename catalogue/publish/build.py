@@ -132,6 +132,24 @@ def _place(listing: dict[str, Any], up: Upstream) -> dict[str, Any] | None:
     }
 
 
+def fallback_hero(pid: int, up: Upstream) -> dict[str, Any] | None:
+    """A city with no hero photo of its own shows its best hero-quality place photo, captioned
+    with the place name and keeping that photo's credit. Nothing qualifies: stays empty."""
+    best: tuple[float, str, dict[str, Any], str] | None = None
+    for listing in up.place_listings.get(pid, []):
+        row = up.photos.get(("listing", listing["page_id"], listing["ordinal"]))
+        if not row or not row.get("hero_quality"):
+            continue
+        photo = photo_of(row, Counter())  # a throwaway counter: this is a search, not a use
+        if photo is None:
+            continue
+        score = float(row.get("score") or 0)
+        key = listing["listing_key"]
+        if best is None or (-score, key) < (-best[0], best[1]):
+            best = (score, key, photo, listing["name"].strip())
+    return None if best is None else {**best[2], "caption": best[3]}
+
+
 def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
     pid = row["wikivoyage_page_id"]
     zone = up.timezones.get(pid)
@@ -175,6 +193,8 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         {k: b.get(k) for k in BAND_FIELDS}
         for b in sorted(up.bands.get(pid, []), key=lambda b: (b["kind"], b["group"], b["basis"]))
     ]
+    own_hero = photo_of(up.photos.get(("article", pid, 0)), up.counts)
+    hero = {**own_hero, "caption": None} if own_hero else fallback_hero(pid, up)
     return {
         "schema_version": SCHEMA_VERSION,
         "slug": row["slug"],
@@ -182,7 +202,7 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         "country_iso": row.get("country_iso"),
         "tier": row["tier"],
         "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts),
-        "hero": photo_of(up.photos.get(("article", pid, 0)), up.counts),
+        "hero": hero,
         "timezone": {"name": zone["timezone"], "basis": zone.get("timezone_basis")}
         if zone and zone.get("timezone")
         else None,

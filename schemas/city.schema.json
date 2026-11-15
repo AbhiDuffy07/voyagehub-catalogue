@@ -314,6 +314,18 @@
     "Photo": {
       "additionalProperties": false,
       "properties": {
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        },
         "credit": {
           "$ref": "#/$defs/Credit"
         },

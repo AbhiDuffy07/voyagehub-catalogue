@@ -90,7 +90,6 @@ def build(tmp_path: Path) -> dict:
             **rf.photo("listing", 1, 4),
             "photo": {"commons_file": "bad.jpg", "thumb_url": "https://t/x"},
         },
-        ph("article", 2, hero=True),
         *(ph("listing", 20, i, hero=(i == 1)) for i in (1, 2, 3)),
     ]
     pho = root / "photos"
