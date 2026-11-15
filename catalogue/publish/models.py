@@ -44,7 +44,7 @@ class Timezone(_Model):
 class Place(_Model):
     key: str
     name: str
-    kind: str
+    kind: str | None  # None: a block stop whose listing is not in the listings file
     lat: float | None
     long: float | None
     summary: Text | None
@@ -108,6 +108,21 @@ class PriceBand(_Model):
     n_fresh: int | None
 
 
+class RideApp(_Model):
+    name: str
+    url: str
+
+
+class RideApps(_Model):
+    apps: list[RideApp]
+    note: str
+
+
+class GettingAround(_Model):
+    excerpt: Text | None  # the Wikivoyage "Get around" section, shortened
+    ride_apps: RideApps | None  # the country's ride apps (names and links only)
+
+
 class CityFile(_Model):
     schema_version: Literal[1]
     slug: str = Field(pattern=SLUG)
@@ -117,6 +132,7 @@ class CityFile(_Model):
     summary: Text | None
     hero: Photo | None
     timezone: Timezone | None
+    getting_around: GettingAround
     places: list[Place]
     blocks: list[Block]
     days: list[Day]
@@ -138,7 +154,7 @@ class IndexFile(_Model):
 
 
 class AttributionEntry(_Model):
-    kind: Literal["photo", "summary"]
+    kind: Literal["photo", "summary", "getting_around"]
     city: str
     subject: str
     author: str | None

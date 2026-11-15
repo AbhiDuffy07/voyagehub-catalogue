@@ -1,0 +1,23 @@
+# Content rules for publish-static (B13). Nothing here is country-specific.
+
+[hero]
+# A city's own photo is its hero only if it passes the B6 checks (config/photo_select.toml: hero
+# size, file-name drop words; overrides/rejected_photos.csv) plus the ones below. Otherwise the
+# city uses the best place photo that passes the same checks (see build.fallback_hero).
+# B6 has no collage word, so a city montage passed B6 as a 640 px "photo of the place".
+collage_words = ["montage", "collage", "compilation", "composite", "mosaic", "icons"]
+# An author must be a name: a credit line that points elsewhere, is a pasted caption, or holds an
+# e-mail address (never published) is not.
+bad_author_phrases = [
+  "see above", "see below", "see description", "see file", "see source", "compilation", "unknown",
+  "( talk", "(talk",
+]
+max_author_chars = 100
+
+[getting_around]
+# The excerpt of the Wikivoyage "Get around" section: whole paragraphs from the start, at most
+# max_chars characters (a longer first paragraph is cut at its last sentence end, or at a word
+# with an ellipsis). A paragraph shorter than min_paragraph_chars without a sentence end is a
+# heading or list stub and is skipped; a paragraph with wiki markup left in it is skipped.
+max_chars = 400
+min_paragraph_chars = 40

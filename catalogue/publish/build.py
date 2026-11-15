@@ -9,6 +9,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from catalogue.blocks.inputs import _point
+from catalogue.publish.getting_around import (
+    ContentRules,
+    excerpt_of,
+    load_content_rules,
+    load_ride_apps,
+)
+from catalogue.publish.hero import HeroRules, hero_problem, load_hero_rules
 from catalogue.publish.models import SCHEMA_VERSION
 
 COST_FIELDS = (
@@ -48,6 +55,11 @@ class Upstream:
     days: dict[int, list[dict[str, Any]]]
     bands: dict[int, list[dict[str, Any]]]
     counts: Counter = field(default_factory=Counter)
+    stop_listings: dict[str, dict[str, Any]] = field(default_factory=dict)  # by listing_key
+    sections: dict[int, dict[str, Any]] = field(default_factory=dict)  # "Get around", by page id
+    ride_apps: dict[str, dict[str, Any]] = field(default_factory=load_ride_apps)
+    hero_rules: HeroRules = field(default_factory=load_hero_rules)
+    content_rules: ContentRules = field(default_factory=load_content_rules)
 
 
 def _https(*urls: Any) -> bool:
@@ -71,9 +83,12 @@ def photo_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | No
     ):
         counts["photos_left_out_no_credit"] += 1
         return None
+    thumb_width, width = photo.get("thumb_width"), photo.get("width")
+    if isinstance(thumb_width, int) and isinstance(width, int) and 0 < width < thumb_width:
+        thumb_width = width  # a small original is served as it is, not enlarged
     return {
         "thumb_url": photo["thumb_url"],
-        "thumb_width": photo.get("thumb_width"),
+        "thumb_width": thumb_width,
         "width": photo.get("width"),
         "height": photo.get("height"),
         "credit": {
@@ -115,16 +130,16 @@ def _cost(pair: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-def _place(listing: dict[str, Any], up: Upstream) -> dict[str, Any] | None:
+def _place(listing: dict[str, Any], up: Upstream, is_stop: bool) -> dict[str, Any] | None:
     key = ("listing", listing["page_id"], listing["ordinal"])
     photo = photo_of(up.photos.get(key), up.counts)
-    if photo is None:
-        return None  # a place on the page is a photographed place (B12 counts the same)
+    if photo is None and not is_stop:
+        return None  # a place is a photographed place (B12 counts the same) or a block stop
     point = _point(listing.get("lat"), listing.get("long"))
     return {
         "key": listing["listing_key"],
         "name": listing["name"].strip(),
-        "kind": listing["kind"],
+        "kind": listing.get("kind"),
         "lat": point[0] if point else None,
         "long": point[1] if point else None,
         "summary": text_of(up.summaries.get(key), up.counts),
@@ -141,7 +156,7 @@ def fallback_hero(pid: int, up: Upstream) -> dict[str, Any] | None:
         if not row or not row.get("hero_quality"):
             continue
         photo = photo_of(row, Counter())  # a throwaway counter: this is a search, not a use
-        if photo is None:
+        if photo is None or hero_problem(row, up.hero_rules):
             continue
         score = float(row.get("score") or 0)
         key = listing["listing_key"]
@@ -150,15 +165,82 @@ def fallback_hero(pid: int, up: Upstream) -> dict[str, Any] | None:
     return None if best is None else {**best[2], "caption": best[3]}
 
 
+def _hero_of(pid: int, up: Upstream) -> dict[str, Any] | None:
+    """The city's own photo if it passes the hero checks, else the best place photo that does."""
+    row = up.photos.get(("article", pid, 0))
+    if row and row.get("photo"):
+        problem = hero_problem(row, up.hero_rules)
+        if problem:
+            up.counts[f"own_hero_rejected_{problem}"] += 1
+        elif (own := photo_of(row, up.counts)) is not None:
+            return {**own, "caption": None}
+    return fallback_hero(pid, up)
+
+
+def _stop_listing(stop: dict[str, Any], up: Upstream) -> dict[str, Any]:
+    """The stop's listing; when the listings file lacks it, what the stop itself says."""
+    found = up.stop_listings.get(stop["listing_key"])
+    if found is not None and (found.get("name") or "").strip():
+        return found
+    return {
+        "listing_key": stop["listing_key"],
+        "page_id": stop["page_id"],
+        "ordinal": stop["ordinal"],
+        "name": stop["name"],
+        "kind": (found or {}).get("kind"),
+        "lat": stop.get("lat"),
+        "long": stop.get("long"),
+    }
+
+
+def _getting_around(row: dict[str, Any], pid: int, up: Upstream) -> dict[str, Any]:
+    section = up.sections.get(pid)
+    excerpt = None
+    text = excerpt_of(section.get("text") or "", up.content_rules) if section else None
+    heading = (section or {}).get("section_heading") or "Get around"
+    title = (section or {}).get("page_title") or row["title"]
+    source = section.get("source_url") if section else None
+    if text and section.get("licence") and section.get("attribution") and _https(source):
+        base, _, rest = source.partition("&oldid=")
+        excerpt = {
+            "text": text,
+            "credit": {
+                "author": "Wikivoyage contributors",
+                "licence": section["licence"],
+                "licence_url": section.get("licence_url") or None,
+                "source_url": f"{source}#{heading.replace(' ', '_')}",
+                "attribution": (
+                    f'From the Wikivoyage article "{title}" (section "{heading}") '
+                    f"by {section['attribution']}, "
+                    f"{section['licence']}"
+                ),
+                "history_url": f"{base}&action=history" if rest else None,
+            },
+        }
+    elif text:
+        up.counts["getting_around_left_out_no_credit"] += 1
+    apps = up.ride_apps.get(str(row.get("country_iso") or ""))
+    return {"excerpt": excerpt, "ride_apps": apps}
+
+
 def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
     pid = row["wikivoyage_page_id"]
     zone = up.timezones.get(pid)
+    stop_rows = [
+        s
+        for b in up.blocks.get(pid, [])
+        for s in up.stops.get(b["block_id"], [])
+        if s.get("listing_key")
+    ]
+    stops_by_key = {s["listing_key"]: s for s in stop_rows}
+    entries = {r["listing_key"]: r for r in up.place_listings.get(pid, [])}
+    for key, stop in stops_by_key.items():
+        if key not in entries:
+            entries[key] = _stop_listing(stop, up)
     places = [
         p
-        for listing in sorted(
-            up.place_listings.get(pid, []), key=lambda r: (r["page_id"], r["ordinal"])
-        )
-        if (p := _place(listing, up)) is not None
+        for listing in sorted(entries.values(), key=lambda r: (r["page_id"], r["ordinal"]))
+        if (p := _place(listing, up, listing["listing_key"] in stops_by_key)) is not None
     ]
     blocks = [
         {
@@ -193,8 +275,7 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         {k: b.get(k) for k in BAND_FIELDS}
         for b in sorted(up.bands.get(pid, []), key=lambda b: (b["kind"], b["group"], b["basis"]))
     ]
-    own_hero = photo_of(up.photos.get(("article", pid, 0)), up.counts)
-    hero = {**own_hero, "caption": None} if own_hero else fallback_hero(pid, up)
+    hero = _hero_of(pid, up)
     return {
         "schema_version": SCHEMA_VERSION,
         "slug": row["slug"],
@@ -206,6 +287,7 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         "timezone": {"name": zone["timezone"], "basis": zone.get("timezone_basis")}
         if zone and zone.get("timezone")
         else None,
+        "getting_around": _getting_around(row, pid, up),
         "places": places,
         "blocks": blocks,
         "days": days,

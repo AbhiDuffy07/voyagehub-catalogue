@@ -311,6 +311,37 @@
       "title": "Day",
       "type": "object"
     },
+    "GettingAround": {
+      "additionalProperties": false,
+      "properties": {
+        "excerpt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ride_apps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RideApps"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "excerpt",
+        "ride_apps"
+      ],
+      "title": "GettingAround",
+      "type": "object"
+    },
     "Photo": {
       "additionalProperties": false,
       "properties": {
@@ -385,8 +416,15 @@
           "type": "string"
         },
         "kind": {
-          "title": "Kind",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
         },
         "lat": {
           "anyOf": [
@@ -541,6 +579,47 @@
       "title": "PriceBand",
       "type": "object"
     },
+    "RideApp": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "title": "RideApp",
+      "type": "object"
+    },
+    "RideApps": {
+      "additionalProperties": false,
+      "properties": {
+        "apps": {
+          "items": {
+            "$ref": "#/$defs/RideApp"
+          },
+          "title": "Apps",
+          "type": "array"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "apps",
+        "note"
+      ],
+      "title": "RideApps",
+      "type": "object"
+    },
     "Stop": {
       "additionalProperties": false,
       "properties": {
@@ -687,6 +766,9 @@
       "title": "Days",
       "type": "array"
     },
+    "getting_around": {
+      "$ref": "#/$defs/GettingAround"
+    },
     "hero": {
       "anyOf": [
         {
@@ -764,6 +846,7 @@
     "summary",
     "hero",
     "timezone",
+    "getting_around",
     "places",
     "blocks",
     "days",

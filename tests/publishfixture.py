@@ -25,6 +25,13 @@ CREDIT_PHOTO = {
 }
 
 
+GET_AROUND = (
+    "Auto rickshaws and app cabs are the easiest way around. Agree the fare first.\n\n"
+    "By metro\n\n"
+    "The metro runs from 6AM to 10PM and covers the old city and the main stations well."
+)
+
+
 def _summary(subject, pid, ordinal, text, key=None):
     return {
         "subject": subject,
@@ -72,9 +79,40 @@ def build(tmp_path: Path) -> dict:
         for i in (1, 2, 3)
     ]
     lis = root / "listings"
+    sections = [
+        {
+            "page_id": 1,
+            "page_title": "Jaipur",
+            "section_key": "get_around",
+            "ordinal": 3,
+            "section_heading": "Get around",
+            "kind": "prose",
+            "text": GET_AROUND,
+            "source_url": "https://en.wikivoyage.org/w/index.php?title=Jaipur&oldid=11",
+            "attribution": "Wikivoyage contributors",
+            "licence": "CC BY-SA 4.0",
+            "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        },
+        {
+            "page_id": 2,
+            "page_title": "Agra",
+            "section_key": "get_around",
+            "ordinal": 3,
+            "section_heading": "Get around",
+            "kind": "prose",
+            "text": "",
+            "source_url": "https://en.wikivoyage.org/w/index.php?title=Agra&oldid=22",
+            "attribution": "Wikivoyage contributors",
+            "licence": "CC BY-SA 4.0",
+            "licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        },
+    ]
     rf.manifest(
         lis,
-        {"listings.jsonl": rf.jsonl(lis / "listings.jsonl", listings)},
+        {
+            "listings.jsonl": rf.jsonl(lis / "listings.jsonl", listings),
+            "sections.jsonl": rf.jsonl(lis / "sections.jsonl", sections),
+        },
         articles_sha256=articles_hash,
     )
 
@@ -142,6 +180,30 @@ def build(tmp_path: Path) -> dict:
             "long": 75.8,
             "minutes_min": 30,
             "minutes_max": 60,
+        },
+        {  # a listing whose photo is unusable: still a place, with no photo
+            "block_id": "jaipur-full",
+            "position": 3,
+            "listing_key": "see:fort-4",
+            "page_id": 1,
+            "ordinal": 4,
+            "name": "Fort 4",
+            "lat": 26.94,
+            "long": 75.8,
+            "minutes_min": 20,
+            "minutes_max": 40,
+        },
+        {  # a listing that is not in the listings file at all
+            "block_id": "jaipur-full",
+            "position": 4,
+            "listing_key": "see:gone",
+            "page_id": 1,
+            "ordinal": 99,
+            "name": "Gone Gate",
+            "lat": 26.99,
+            "long": 75.81,
+            "minutes_min": None,
+            "minutes_max": None,
         },
     ]
     rf.manifest(

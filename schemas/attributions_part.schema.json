@@ -37,7 +37,8 @@
         "kind": {
           "enum": [
             "photo",
-            "summary"
+            "summary",
+            "getting_around"
           ],
           "title": "Kind",
           "type": "string"

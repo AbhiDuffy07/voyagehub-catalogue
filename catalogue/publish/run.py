@@ -52,6 +52,7 @@ from catalogue.readiness.run import (
 
 READINESS_FILE = "city_readiness.jsonl"
 STOPS_FILE = "day_block_stops.jsonl"
+SECTIONS_FILE = "sections.jsonl"
 BANDS_FILE = "city_price_bands.jsonl"
 COSTS_FILE = "block_costs.jsonl"
 DAY_COSTS_FILE = "day_costs.jsonl"
@@ -73,6 +74,10 @@ class PublishResult:
                 f"{t['skipped_no_slug']})",
                 f"files: {t['files']}, total {t['total_bytes']} bytes, largest city file "
                 f"{t['largest_city_bytes']} bytes",
+                f"getting around: {t['with_getting_around_excerpt']} with an excerpt, "
+                f"{t['with_ride_apps']} with ride apps of {t['cities']} cities",
+                f"city photos not used as hero (replaced by a place photo or none): "
+                f"{t['own_hero_rejected']}",
                 f"thin cities: {t['without_hero']} without a hero photo, "
                 f"{t['without_summary']} without a summary, {t['not_ready_published']} "
                 "published but not ready now",
@@ -191,6 +196,7 @@ def run_publish_static(
         SUMMARIES_FILE: _verify(
             summaries_folder, SUMMARIES_FILE, "wikipedia-summary", country_filter
         ),
+        SECTIONS_FILE: _verify(listings_folder, SECTIONS_FILE, "fetch-listings", country_filter),
         PHOTOS_FILE: _verify(photos_folder, PHOTOS_FILE, "photo-select", country_filter),
         BLOCKS_FILE: _verify(blocks_folder, BLOCKS_FILE, "draft-blocks", country_filter),
         STOPS_FILE: _verify(blocks_folder, STOPS_FILE, "draft-blocks", country_filter),
@@ -293,6 +299,24 @@ def run_publish_static(
             (r for r in _rows(prices_folder / BANDS_FILE) if r["owner_page_id"] in wanted),
             "owner_page_id",
         )
+        stop_keys = {
+            s["listing_key"] for rows in stops.values() for s in rows if s.get("listing_key")
+        }
+        stop_listings = {
+            r["listing_key"]: r
+            for r in _rows(listings_folder / LISTINGS_FILE)
+            if r.get("listing_key") in stop_keys
+        }
+        sections: dict[int, dict[str, Any]] = {}
+        for r in sorted(
+            (
+                r
+                for r in _rows(listings_folder / SECTIONS_FILE)
+                if r["section_key"] == "get_around" and r["page_id"] in wanted
+            ),
+            key=lambda r: r["ordinal"],
+        ):
+            sections.setdefault(r["page_id"], r)  # a page's first "Get around" heading
     except (KeyError, TypeError, AttributeError):
         raise PipelineError("an input file has a damaged row") from None
 
@@ -307,6 +331,8 @@ def run_publish_static(
         days=days,
         bands=bands,
         counts=counts,
+        stop_listings=stop_listings,
+        sections=sections,
     )
     files: dict[str, bytes] = {}
     index_cities: list[dict[str, Any]] = []
@@ -351,6 +377,17 @@ def run_publish_static(
                         **{k: item["credit"].get(k) for k in CREDIT_KEYS},
                     }
                 )
+        if city["getting_around"]["excerpt"]:
+            counts["with_getting_around_excerpt"] += 1
+            entries.append(
+                {
+                    "kind": "getting_around",
+                    "city": city["slug"],
+                    "subject": "city",
+                    **{k: city["getting_around"]["excerpt"]["credit"].get(k) for k in CREDIT_KEYS},
+                }
+            )
+        counts["with_ride_apps"] += city["getting_around"]["ride_apps"] is not None
         counts["without_hero"] += city["hero"] is None
         counts["without_summary"] += city["summary"] is None
         counts["not_ready_published"] += city["tier"] == "not_ready"
@@ -413,6 +450,14 @@ def run_publish_static(
     version = version_of(hashes)
     totals = {
         "without_hero": counts["without_hero"],
+        "own_hero_rejected": {
+            k.removeprefix("own_hero_rejected_"): v
+            for k, v in sorted(counts.items())
+            if k.startswith("own_hero_rejected_")
+        },
+        "with_getting_around_excerpt": counts["with_getting_around_excerpt"],
+        "with_ride_apps": counts["with_ride_apps"],
+        "getting_around_left_out_no_credit": counts["getting_around_left_out_no_credit"],
         "without_summary": counts["without_summary"],
         "not_ready_published": counts["not_ready_published"],
         "cities": len(index_cities),

@@ -88,7 +88,8 @@ def _group_estimate(
     total_high = sum(p["high_minor"] for p in present) if present else None
     basis: list[str] = []
     if exact["stops"]:
-        span = f"{min(edit_years)[:4]}-{max(edit_years)[:4]}"
+        first, last = min(edit_years)[:4], max(edit_years)[:4]
+        span = first if first == last else f"{first}-{last}"
         basis.append(f"{exact['stops']} stop(s) with an exact price (edited {span})")
     for kind, (band, count) in sorted(band_use.items()):
         basis.append(f"{count} stop(s) at the {kind} city band (n={band['n_prices']})")

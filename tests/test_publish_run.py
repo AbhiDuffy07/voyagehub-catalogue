@@ -52,11 +52,12 @@ def test_every_photo_keeps_author_licence_and_link(tmp_path):
         assert credit["source_url"].startswith("https://commons.wikimedia.org/")
 
 
-def test_places_are_photographed_listings_and_empty_values_stay_empty(tmp_path):
+def test_places_hold_photographed_listings_and_every_stop_and_empty_values_stay_empty(tmp_path):
     result, _ = _build(tmp_path)
     city = _json(result.site_dir / V1 / "cities" / "jaipur.json")
     names = [p["name"] for p in city["places"]]
-    assert names == ["Fort 1", "Fort 2", "Fort 3"]  # Fort 4 has no photo
+    # photographed listings first by page order, then every other block stop (no photo)
+    assert names == ["Fort 1", "Fort 2", "Fort 3", "Fort 4", "Gone Gate"]
     assert city["places"][0]["summary"]["text"] == "Fort one."
     assert city["places"][1]["summary"] is None  # never filled in
 
@@ -66,7 +67,7 @@ def test_blocks_carry_stops_and_cost_with_basis(tmp_path):
     city = _json(result.site_dir / V1 / "cities" / "jaipur.json")
     (block,) = city["blocks"]
     assert block["id"] == "jaipur-full"
-    assert [s["name"] for s in block["stops"]] == ["Fort 1", "Fort 2"]
+    assert [s["name"] for s in block["stops"]] == ["Fort 1", "Fort 2", "Fort 4", "Gone Gate"]
     foreigner = block["cost"]["foreigner"]
     assert foreigner["basis"] == "2 stop(s) with no price"
     assert foreigner["total_low_minor"] is None
@@ -112,7 +113,7 @@ def test_attributions_split_into_parts_under_the_size_target(tmp_path):
     result = run_publish_static(**kwargs, limits=limits)
     doc, entries = _entries(result.site_dir)
     assert len(doc["parts"]) > 1
-    assert sum(p["entries"] for p in doc["parts"]) == len(entries) == 11
+    assert sum(p["entries"] for p in doc["parts"]) == len(entries) == 12
     for part in doc["parts"]:
         # a part is under the target unless a single entry is bigger than the target
         assert (result.site_dir / V1 / part["file"]).stat().st_size < 4000
@@ -231,7 +232,8 @@ def test_a_photo_without_a_licence_is_left_out_and_counted(tmp_path):
     result, _ = _build(tmp_path)
     assert result.totals["photos_left_out_no_credit"] == 1
     city = _json(result.site_dir / V1 / "cities" / "jaipur.json")
-    assert "Fort 4" not in [p["name"] for p in city["places"]]
+    fort_4 = next(p for p in city["places"] if p["name"] == "Fort 4")
+    assert fort_4["photo"] is None  # a stop of a block stays a place, photo left out
 
 
 def test_a_photo_with_neither_author_nor_attribution_is_left_out():
