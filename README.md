@@ -182,6 +182,22 @@ Offline and fast (seconds): no network, no settings. It reads `out/listings/`, `
 - **Files:** `listing_prices.jsonl`, `city_price_bands.jsonl`, `block_costs.jsonl`, `day_costs.jsonl`, `report.md`, `cost_sample.md` (a seeded sample of 20 blocks for the author's own review) and `manifest.json`. A rerun gives identical files.
 - **Not done:** an official fee override (ASI first): ASI publishes rates on per-monument pages with online and cash rates that differ, and some pages contradict each other, so there is no single reliable source to read quickly; to do when one is found.
 
+### `readiness`
+
+```
+.venv\Scripts\python -m catalogue readiness --dump-date 20261101 --country IN [--previous out\readiness\<last run>]
+```
+
+Offline and fast (seconds): no network, no settings. It reads, each hash-checked against its manifest and country filter, `out/listings/`, `out/summaries/`, `out/photo_selection/`, `out/blocks/`, `out/block_checks/`, the `discover` articles (the hash `fetch-listings` recorded) and `out/timezones/` (the country run, else the world run). It writes `out/readiness/<dump date>[-CC]/`. Rules and reasons: `config/readiness_rules.toml` (rows carry `readiness_rules_version`). Nobody approves a city by hand.
+
+- **Ready:** the city (Wikivoyage article type `city`) has a summary, a time zone, at least 1 hero photo (B6 `hero_quality`, 2,000 px or more, on its own article or one of its places), at least 3 places with their own B6 photo (a `see` or `do` listing owned by the city, not a duplicate; B6's 640 px gate), and at least 1 `checked` block. A district's listings count for the city that owns them.
+- **Plannable** = ready and the checked blocks fill at least one whole day (`pair_days`); **browse only** = ready but no whole day; otherwise **not ready**, with every failed rule listed.
+- **Publish and unpublish:** a ready city is published at once; a published city is unpublished only after 2 not-ready runs in a row. The count lives in `state.json`, which the next run reads through `--previous`; a published city that disappears from the run counts as a failed run. Making the state survive between scheduled runs is B14. A ready city with **no slug** in `data/slugs.json` is not published (`blocked_no_slug`): the static page needs a slug, and slugs are assigned only in a reviewed discover wave, so most outline cities wait.
+- **Not required here (the design asked for them):** Wikivoyage status usable, guide or star; at least ten mappable sights; a currency the exchange-rate source covers.
+- **Files:** `city_readiness.jsonl` (one row per city: tier, failed rules, the counts behind them, publication action and state), `by_rule.csv`, `by_country.csv`, `report.md`, `sample.md` (a seeded sample of up to 15 cities for the author's own review), `state.json` and `manifest.json`. A rerun gives identical files.
+- **Checks on the inputs:** every folder must come from the same `--dump-date`; the `auto-check` output must have been built from the very `day_blocks.jsonl` read here; the manifest records the hash of the previous `state.json` and of `slugs.json` too. A published city that has lost its slug stays published and is counted (`published_without_slug`).
+- **Known limits:** an attraction sub-article (Agra/Taj Mahal) is not counted as a photographed place of its city; no database is written (B15 maps the tier and publication state).
+
 ## Known follow-ups
 
 Small items found in review of `fetch-listings`, not yet done:
