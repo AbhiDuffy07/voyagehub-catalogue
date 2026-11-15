@@ -147,6 +147,21 @@ def test_headers_file_sets_cache_rules(tmp_path):
     assert "/v1/index.json" in text and "/v1/manifest.json" in text
 
 
+def test_data_files_are_revalidated_so_updates_reach_the_app(tmp_path):
+    result, _ = _build(tmp_path)
+    text = (result.site_dir / "_headers").read_text(encoding="utf-8")
+    rules = {}
+    path = None
+    for line in text.splitlines():
+        if line and not line.startswith(" "):
+            path = line
+        elif line.strip().startswith("Cache-Control:"):
+            rules[path] = line.split(":", 1)[1].strip()
+    for path in ("/v1/cities/*", "/v1/attributions.json", "/v1/attributions/*"):
+        assert rules[path] == "public, max-age=0, must-revalidate", path
+    assert all("max-age=3600" not in v for v in rules.values())
+
+
 def test_a_slugless_published_city_is_skipped_and_counted(tmp_path):
     kwargs = publishfixture.build(tmp_path)
     path = kwargs["readiness_folder"] / "city_readiness.jsonl"
