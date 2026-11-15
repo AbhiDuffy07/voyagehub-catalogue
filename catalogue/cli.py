@@ -2,8 +2,8 @@
 
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
 enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
-in B6, draft-blocks in B8, auto-check in B10, price-bands in B11, readiness in B12; the rest arrive
-one by one in later sessions).
+in B6, draft-blocks in B8, auto-check in B10, price-bands in B11, readiness in B12, publish-static
+and deploy in B13; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -34,6 +34,8 @@ from catalogue.listings.run import run_fetch_listings
 from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
 from catalogue.prices.run import run_price_bands
+from catalogue.publish.deploy import PROJECT_NAME_DEFAULT, deploy
+from catalogue.publish.run import run_publish_static
 from catalogue.readiness.run import run_readiness
 from catalogue.settings import Settings, SettingsError, load_settings
 
@@ -252,6 +254,38 @@ def _parser() -> argparse.ArgumentParser:
         help="the readiness folder of the previous run (carries the publication state)",
     )
     readiness.add_argument("--out-dir", type=Path, default=Path("out/readiness"))
+
+    publish = commands.add_parser(
+        "publish-static",
+        help="build the static JSON site for the published cities (offline)",
+    )
+    publish.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    publish.add_argument("--country", help="only this ISO country code (same as readiness)")
+    for flag, default, help_text in (
+        ("--readiness-dir", "out/readiness", "where readiness wrote"),
+        ("--listings-dir", "out/listings", "where fetch-listings wrote"),
+        ("--summaries-dir", "out/summaries", "where wikipedia-summary wrote"),
+        ("--photos-dir", "out/photo_selection", "where photo-select wrote"),
+        ("--blocks-dir", "out/blocks", "where draft-blocks wrote"),
+        ("--checks-dir", "out/block_checks", "where auto-check wrote"),
+        (
+            "--timezones-dir",
+            "out/timezones",
+            "where derive-timezone wrote (the world run is used when there is no country run)",
+        ),
+        ("--prices-dir", "out/prices", "where price-bands wrote"),
+    ):
+        publish.add_argument(flag, type=Path, default=Path(default), help=help_text)
+    publish.add_argument("--out-dir", type=Path, default=Path("out/publish"))
+
+    deploy_cmd = commands.add_parser(
+        "deploy",
+        help="upload a built site to Cloudflare Pages (pinned wrangler; run wrangler login first)",
+    )
+    deploy_cmd.add_argument("--site-dir", type=Path, required=True, help="the built site")
+    deploy_cmd.add_argument("--project-name", default=PROJECT_NAME_DEFAULT)
+    deploy_cmd.add_argument("--branch", help="Pages branch; a non-production branch is a preview")
+    deploy_cmd.add_argument("--yes", action="store_true", help="confirm that the site is published")
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -534,6 +568,33 @@ def _readiness(args: argparse.Namespace) -> None:
     print(f"files: {result.output_dir}")
 
 
+def _publish_static(args: argparse.Namespace) -> None:
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    zones = args.timezones_dir / folder
+    if not (zones / "manifest.json").is_file():
+        zones = args.timezones_dir / args.dump_date
+    result = run_publish_static(
+        readiness_folder=args.readiness_dir / folder,
+        listings_folder=args.listings_dir / folder,
+        summaries_folder=args.summaries_dir / folder,
+        photos_folder=args.photos_dir / folder,
+        blocks_folder=args.blocks_dir / folder,
+        checks_folder=args.checks_dir / folder,
+        timezones_folder=zones,
+        prices_folder=args.prices_dir / folder,
+        out_dir=args.out_dir,
+        dump_date=args.dump_date,
+        today=datetime.now(UTC).date(),
+        country_iso=args.country,
+    )
+    print(result.summary())
+    print(f"site: {result.site_dir}")
+
+
+def _deploy(args: argparse.Namespace) -> None:
+    deploy(args.site_dir, project=args.project_name, branch=args.branch, confirmed=args.yes)
+
+
 def _derive_timezone(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_derive_timezone(
@@ -618,6 +679,10 @@ def main(
             _price_bands(args)
         elif args.command == "readiness":
             _readiness(args)
+        elif args.command == "publish-static":
+            _publish_static(args)
+        elif args.command == "deploy":
+            _deploy(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
         else:

@@ -1,0 +1,103 @@
+{
+  "$defs": {
+    "FileInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "bytes"
+      ],
+      "title": "FileInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "blocks_rules_version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Blocks Rules Version"
+    },
+    "country_filter": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Country Filter"
+    },
+    "counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Counts",
+      "type": "object"
+    },
+    "dump_date": {
+      "title": "Dump Date",
+      "type": "string"
+    },
+    "files": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FileInfo"
+      },
+      "title": "Files",
+      "type": "object"
+    },
+    "generated_on": {
+      "title": "Generated On",
+      "type": "string"
+    },
+    "readiness_rules_version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Readiness Rules Version"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "version",
+    "dump_date",
+    "country_filter",
+    "generated_on",
+    "readiness_rules_version",
+    "blocks_rules_version",
+    "counts",
+    "files"
+  ],
+  "title": "ManifestFile",
+  "type": "object"
+}

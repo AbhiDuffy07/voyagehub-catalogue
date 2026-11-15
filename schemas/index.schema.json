@@ -1,0 +1,197 @@
+{
+  "$defs": {
+    "Credit": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "title": "Attribution",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "history_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "History Url"
+        },
+        "licence": {
+          "title": "Licence",
+          "type": "string"
+        },
+        "licence_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Licence Url"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "licence",
+        "licence_url",
+        "source_url",
+        "attribution"
+      ],
+      "title": "Credit",
+      "type": "object"
+    },
+    "IndexCity": {
+      "additionalProperties": false,
+      "properties": {
+        "country_iso": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Country Iso"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "hero": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Photo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "plannable",
+            "browse_only",
+            "not_ready"
+          ],
+          "title": "Tier",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "country_iso",
+        "tier",
+        "hero",
+        "file"
+      ],
+      "title": "IndexCity",
+      "type": "object"
+    },
+    "Photo": {
+      "additionalProperties": false,
+      "properties": {
+        "credit": {
+          "$ref": "#/$defs/Credit"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Height"
+        },
+        "thumb_url": {
+          "title": "Thumb Url",
+          "type": "string"
+        },
+        "thumb_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Thumb Width"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Width"
+        }
+      },
+      "required": [
+        "thumb_url",
+        "thumb_width",
+        "width",
+        "height",
+        "credit"
+      ],
+      "title": "Photo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "cities": {
+      "items": {
+        "$ref": "#/$defs/IndexCity"
+      },
+      "title": "Cities",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "cities"
+  ],
+  "title": "IndexFile",
+  "type": "object"
+}
