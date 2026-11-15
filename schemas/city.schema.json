@@ -1,0 +1,857 @@
+{
+  "$defs": {
+    "Block": {
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostPair"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "day_trip": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Day Trip"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "intro": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Intro"
+        },
+        "minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minutes"
+        },
+        "slot": {
+          "title": "Slot",
+          "type": "string"
+        },
+        "stop_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stop Count"
+        },
+        "stops": {
+          "items": {
+            "$ref": "#/$defs/Stop"
+          },
+          "title": "Stops",
+          "type": "array"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Title"
+        },
+        "walk_km": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Walk Km"
+        }
+      },
+      "required": [
+        "id",
+        "slot",
+        "title",
+        "intro",
+        "minutes",
+        "stop_count",
+        "walk_km",
+        "day_trip",
+        "stops",
+        "cost"
+      ],
+      "title": "Block",
+      "type": "object"
+    },
+    "Cost": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basis"
+        },
+        "complete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Complete"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Currency"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "total_high_minor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total High Minor"
+        },
+        "total_low_minor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Total Low Minor"
+        },
+        "transport": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Transport"
+        }
+      },
+      "required": [
+        "basis",
+        "complete",
+        "currency",
+        "total_low_minor",
+        "total_high_minor",
+        "note",
+        "transport"
+      ],
+      "title": "Cost",
+      "type": "object"
+    },
+    "CostPair": {
+      "additionalProperties": false,
+      "properties": {
+        "foreigner": {
+          "$ref": "#/$defs/Cost"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "resident": {
+          "$ref": "#/$defs/Cost"
+        }
+      },
+      "required": [
+        "label",
+        "foreigner",
+        "resident"
+      ],
+      "title": "CostPair",
+      "type": "object"
+    },
+    "Credit": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "title": "Attribution",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "history_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "History Url"
+        },
+        "licence": {
+          "title": "Licence",
+          "type": "string"
+        },
+        "licence_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Licence Url"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "licence",
+        "licence_url",
+        "source_url",
+        "attribution"
+      ],
+      "title": "Credit",
+      "type": "object"
+    },
+    "Day": {
+      "additionalProperties": false,
+      "properties": {
+        "block_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Block Ids",
+          "type": "array"
+        },
+        "cost": {
+          "$ref": "#/$defs/CostPair"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "block_ids",
+        "cost"
+      ],
+      "title": "Day",
+      "type": "object"
+    },
+    "GettingAround": {
+      "additionalProperties": false,
+      "properties": {
+        "excerpt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ride_apps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RideApps"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "excerpt",
+        "ride_apps"
+      ],
+      "title": "GettingAround",
+      "type": "object"
+    },
+    "Photo": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        },
+        "credit": {
+          "$ref": "#/$defs/Credit"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Height"
+        },
+        "thumb_url": {
+          "title": "Thumb Url",
+          "type": "string"
+        },
+        "thumb_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Thumb Width"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Width"
+        }
+      },
+      "required": [
+        "thumb_url",
+        "thumb_width",
+        "width",
+        "height",
+        "credit"
+      ],
+      "title": "Photo",
+      "type": "object"
+    },
+    "Place": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        },
+        "lat": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lat"
+        },
+        "long": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Long"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "photo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Photo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "kind",
+        "lat",
+        "long",
+        "summary",
+        "photo"
+      ],
+      "title": "Place",
+      "type": "object"
+    },
+    "PriceBand": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "title": "Basis",
+          "type": "string"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "high_minor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "High Minor"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "low_minor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Low Minor"
+        },
+        "median_minor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Median Minor"
+        },
+        "n_fresh": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "N Fresh"
+        },
+        "n_prices": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "N Prices"
+        }
+      },
+      "required": [
+        "kind",
+        "group",
+        "basis",
+        "currency",
+        "low_minor",
+        "high_minor",
+        "median_minor",
+        "label",
+        "n_prices",
+        "n_fresh"
+      ],
+      "title": "PriceBand",
+      "type": "object"
+    },
+    "RideApp": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "title": "RideApp",
+      "type": "object"
+    },
+    "RideApps": {
+      "additionalProperties": false,
+      "properties": {
+        "apps": {
+          "items": {
+            "$ref": "#/$defs/RideApp"
+          },
+          "title": "Apps",
+          "type": "array"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "apps",
+        "note"
+      ],
+      "title": "RideApps",
+      "type": "object"
+    },
+    "Stop": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Key"
+        },
+        "lat": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lat"
+        },
+        "long": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Long"
+        },
+        "minutes_max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minutes Max"
+        },
+        "minutes_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minutes Min"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "lat",
+        "long",
+        "minutes_min",
+        "minutes_max"
+      ],
+      "title": "Stop",
+      "type": "object"
+    },
+    "Text": {
+      "additionalProperties": false,
+      "properties": {
+        "credit": {
+          "$ref": "#/$defs/Credit"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "credit"
+      ],
+      "title": "Text",
+      "type": "object"
+    },
+    "Timezone": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Basis"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "basis"
+      ],
+      "title": "Timezone",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/Block"
+      },
+      "title": "Blocks",
+      "type": "array"
+    },
+    "country_iso": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Country Iso"
+    },
+    "days": {
+      "items": {
+        "$ref": "#/$defs/Day"
+      },
+      "title": "Days",
+      "type": "array"
+    },
+    "getting_around": {
+      "$ref": "#/$defs/GettingAround"
+    },
+    "hero": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Photo"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "places": {
+      "items": {
+        "$ref": "#/$defs/Place"
+      },
+      "title": "Places",
+      "type": "array"
+    },
+    "price_bands": {
+      "items": {
+        "$ref": "#/$defs/PriceBand"
+      },
+      "title": "Price Bands",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "slug": {
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "title": "Slug",
+      "type": "string"
+    },
+    "summary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Text"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tier": {
+      "enum": [
+        "plannable",
+        "browse_only",
+        "not_ready"
+      ],
+      "title": "Tier",
+      "type": "string"
+    },
+    "timezone": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Timezone"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "slug",
+    "title",
+    "country_iso",
+    "tier",
+    "summary",
+    "hero",
+    "timezone",
+    "getting_around",
+    "places",
+    "blocks",
+    "days",
+    "price_bands"
+  ],
+  "title": "CityFile",
+  "type": "object"
+}

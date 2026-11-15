@@ -228,3 +228,17 @@ def test_a_free_exact_stop_counts_even_when_the_citys_currency_is_unknown():
     result = estimate_block(block(), [stop_row()], index, {}, None, RULES)["foreigner"]
     assert result["exact"]["stops"] == 1 and result["total_low_minor"] == 0
     assert result["complete"] is True
+
+
+def test_one_edit_year_is_printed_once_and_two_years_as_a_range():
+    one = estimate([stop_row()], [fresh([entry(50)], edit="2026-03-04")])
+    assert "(edited 2026)" in one["foreigner"]["basis"]
+    assert "2026-2026" not in one["foreigner"]["basis"]
+    two = estimate(
+        [stop_row(1, 1), stop_row(1, 2)],
+        [
+            fresh([entry(50)], ordinal=1, edit="2025-12-01"),
+            fresh([entry(60)], ordinal=2, edit="2026-03-04"),
+        ],
+    )
+    assert "(edited 2025-2026)" in two["foreigner"]["basis"]

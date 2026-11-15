@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "Notice": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "title": "Attribution",
+          "type": "string"
+        },
+        "licence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Licence"
+        },
+        "licence_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Licence Url"
+        }
+      },
+      "required": [
+        "attribution",
+        "licence",
+        "licence_url"
+      ],
+      "title": "Notice",
+      "type": "object"
+    },
+    "PartInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "title": "Entries",
+          "type": "integer"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "first_city": {
+          "title": "First City",
+          "type": "string"
+        },
+        "last_city": {
+          "title": "Last City",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "entries",
+        "first_city",
+        "last_city"
+      ],
+      "title": "PartInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "notices": {
+      "items": {
+        "$ref": "#/$defs/Notice"
+      },
+      "title": "Notices",
+      "type": "array"
+    },
+    "parts": {
+      "items": {
+        "$ref": "#/$defs/PartInfo"
+      },
+      "title": "Parts",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "notices",
+    "parts"
+  ],
+  "title": "AttributionsFile",
+  "type": "object"
+}

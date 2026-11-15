@@ -1,0 +1,24 @@
+# Ride apps shown on every city of a country (publish-static, field getting_around.ride_apps).
+# Text names and official home pages only: no logos, no fares. Keyed by ISO 3166 country code; a
+# country without a table gets no list (never guessed). Checked 2026-11-15: each link opens the
+# company's own site (Uber blocks scripted requests, its page was confirmed by search instead).
+# Adding a country is a data change: a new [XX] table, same shape.
+
+[IN]
+note = "Availability varies by city."
+
+[[IN.apps]]
+name = "Uber"
+url = "https://www.uber.com/in/en/"
+
+[[IN.apps]]
+name = "Ola"
+url = "https://www.olacabs.com/"
+
+[[IN.apps]]
+name = "Rapido"
+url = "https://rapido.bike/"
+
+[[IN.apps]]
+name = "Namma Yatri"
+url = "https://nammayatri.in/"

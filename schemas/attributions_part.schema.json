@@ -1,0 +1,105 @@
+{
+  "$defs": {
+    "AttributionEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "title": "Attribution",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "city": {
+          "title": "City",
+          "type": "string"
+        },
+        "history_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "History Url"
+        },
+        "kind": {
+          "enum": [
+            "photo",
+            "summary",
+            "getting_around"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "licence": {
+          "title": "Licence",
+          "type": "string"
+        },
+        "licence_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Licence Url"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "city",
+        "subject",
+        "author",
+        "licence",
+        "licence_url",
+        "source_url",
+        "attribution"
+      ],
+      "title": "AttributionEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/AttributionEntry"
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "entries"
+  ],
+  "title": "AttributionsPart",
+  "type": "object"
+}
