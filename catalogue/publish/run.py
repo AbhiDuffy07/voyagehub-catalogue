@@ -40,6 +40,7 @@ from catalogue.publish.models import (
     IndexFile,
     ManifestFile,
 )
+from catalogue.publish.site import HEADERS, version_of
 from catalogue.readiness.rules import ReadinessRules, load_readiness_rules
 from catalogue.readiness.run import (
     BLOCKS_FILE,
@@ -55,16 +56,7 @@ BANDS_FILE = "city_price_bands.jsonl"
 COSTS_FILE = "block_costs.jsonl"
 DAY_COSTS_FILE = "day_costs.jsonl"
 API = "v1"
-HEADERS = """/v1/index.json
-  Cache-Control: public, max-age=300
-/v1/manifest.json
-  Cache-Control: public, max-age=60
-/v1/attributions.json
-  Cache-Control: public, max-age=3600
-/v1/cities/*
-  Cache-Control: public, max-age=3600
-"""
-CREDIT_KEYS = ("author", "licence", "licence_url", "source_url", "attribution")
+CREDIT_KEYS = ("author", "licence", "licence_url", "source_url", "attribution", "history_url")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +73,9 @@ class PublishResult:
                 f"{t['skipped_no_slug']})",
                 f"files: {t['files']}, total {t['total_bytes']} bytes, largest city file "
                 f"{t['largest_city_bytes']} bytes",
+                f"thin cities: {t['without_hero']} without a hero photo, "
+                f"{t['without_summary']} without a summary, {t['not_ready_published']} "
+                "published but not ready now",
                 f"photos {t['photos']}, summaries {t['summaries']}; left out for missing credit: "
                 f"{t['photos_left_out_no_credit']} photos, "
                 f"{t['summaries_left_out_no_credit']} summaries",
@@ -111,13 +106,45 @@ def _chunks(entries: list[dict[str, Any]], target: int) -> list[list[dict[str, A
     parts: list[list[dict[str, Any]]] = []
     size = 0
     for entry in entries:
-        length = len(json.dumps(entry, ensure_ascii=False, separators=(",", ":"))) + 1
+        text = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        length = len(text.encode("utf-8")) + 1
         if not parts or size + length > target:
             parts.append([])
             size = 0
         parts[-1].append(entry)
         size += length
     return parts
+
+
+def _unique(rows: Iterable[dict[str, Any]], key: Any, name: str) -> dict[Any, dict[str, Any]]:
+    found: dict[Any, dict[str, Any]] = {}
+    for r in rows:
+        k = key(r)
+        if k in found:
+            raise PipelineError(f"{name} has more than one row for the same key")
+        found[k] = r
+    return found
+
+
+def _manifest(folder: Path, job: str) -> dict[str, Any]:
+    try:
+        return json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise PipelineError(f"the {job} manifest.json is damaged; run {job} again") from None
+
+
+def _lineage(manifest: dict[str, Any], job: str, digests: dict[str, str]) -> None:
+    """A job must have been built from exactly the input files that are being published."""
+    try:
+        recorded = manifest["inputs_sha256"]
+        for name, digest in digests.items():
+            if recorded[name] != digest:
+                raise PipelineError(
+                    f"{job} was built from other {name.removesuffix('.jsonl')} than these; "
+                    f"run {job} again"
+                )
+    except (KeyError, TypeError):
+        raise PipelineError(f"the {job} manifest.json is damaged; run {job} again") from None
 
 
 def _group(rows: Iterable[dict[str, Any]], key: str) -> dict[Any, list[dict[str, Any]]]:
@@ -159,43 +186,84 @@ def run_publish_static(
     ):
         _same_dump(folder, job, dump_date)
     readiness_manifest = _verify_readiness(readiness_folder, country_filter, dump_date)
-    _verify(listings_folder, LISTINGS_FILE, "fetch-listings", country_filter)
-    _verify(summaries_folder, SUMMARIES_FILE, "wikipedia-summary", country_filter)
-    _verify(photos_folder, PHOTOS_FILE, "photo-select", country_filter)
-    _verify(blocks_folder, BLOCKS_FILE, "draft-blocks", country_filter)
-    _verify(blocks_folder, STOPS_FILE, "draft-blocks", country_filter)
-    _verify(checks_folder, CHECKS_FILE, "auto-check", country_filter)
-    _verify_timezones(timezones_folder, country_filter)
+    digests = {
+        LISTINGS_FILE: _verify(listings_folder, LISTINGS_FILE, "fetch-listings", country_filter),
+        SUMMARIES_FILE: _verify(
+            summaries_folder, SUMMARIES_FILE, "wikipedia-summary", country_filter
+        ),
+        PHOTOS_FILE: _verify(photos_folder, PHOTOS_FILE, "photo-select", country_filter),
+        BLOCKS_FILE: _verify(blocks_folder, BLOCKS_FILE, "draft-blocks", country_filter),
+        STOPS_FILE: _verify(blocks_folder, STOPS_FILE, "draft-blocks", country_filter),
+        CHECKS_FILE: _verify(checks_folder, CHECKS_FILE, "auto-check", country_filter),
+        TIMEZONES_FILE: _verify_timezones(timezones_folder, country_filter),
+    }
     for name in (BANDS_FILE, COSTS_FILE, DAY_COSTS_FILE):
         _verify(prices_folder, name, "price-bands", country_filter)
+    _lineage(
+        readiness_manifest,
+        "readiness",
+        {n: digests[n] for n in (LISTINGS_FILE, SUMMARIES_FILE, PHOTOS_FILE, BLOCKS_FILE)}
+        | {CHECKS_FILE: digests[CHECKS_FILE], TIMEZONES_FILE: digests[TIMEZONES_FILE]},
+    )
+    _lineage(
+        _manifest(checks_folder, "auto-check"), "auto-check", {BLOCKS_FILE: digests[BLOCKS_FILE]}
+    )
+    try:
+        if (
+            _manifest(blocks_folder, "draft-blocks")["rules_version"]
+            != _manifest(checks_folder, "auto-check")["blocks_rules_version"]
+        ):
+            raise PipelineError(
+                "auto-check output was built from other draft-blocks rules; run auto-check again"
+            )
+    except (KeyError, TypeError):
+        raise PipelineError("a manifest.json is damaged; run the job again") from None
+    _lineage(
+        _manifest(prices_folder, "price-bands"),
+        "price-bands",
+        {n: digests[n] for n in (LISTINGS_FILE, BLOCKS_FILE, STOPS_FILE, CHECKS_FILE)},
+    )
 
     counts: Counter[str] = Counter()
     try:
         city_rows = [r for r in _rows(readiness_folder / READINESS_FILE) if r["published"]]
         selected = [r for r in city_rows if r["slug"]]
+        if len({r["slug"] for r in selected}) != len(selected):
+            raise PipelineError("two published cities share one slug in readiness")
         counts["skipped_no_slug"] = len(city_rows) - len(selected)
         wanted = {r["wikivoyage_page_id"] for r in selected}
-        place_listings = _group(
-            (
-                r
-                for r in _rows(listings_folder / LISTINGS_FILE)
-                if r["owner_page_id"] in wanted
-                and r["kind"] in rules.place_sections
+        place_rows: list[dict[str, Any]] = []
+        notice_of: dict[tuple[int, int], tuple[str, str | None, str | None]] = {}
+        for r in _rows(listings_folder / LISTINGS_FILE):
+            if r["owner_page_id"] not in wanted:
+                continue
+            if r.get("attribution"):
+                notice_of[(r["page_id"], r["ordinal"])] = (
+                    r["attribution"],
+                    r.get("licence"),
+                    r.get("licence_url"),
+                )
+            if (
+                r["kind"] in rules.place_sections
                 and not r["duplicate_of"]
                 and (r.get("name") or "").strip()
-            ),
-            "owner_page_id",
+            ):
+                place_rows.append(r)
+        place_listings = _group(place_rows, "owner_page_id")
+        by_subject = lambda r: (r["subject"], r["page_id"], r["ordinal"])  # noqa: E731
+        photos = _unique(_rows(photos_folder / PHOTOS_FILE), by_subject, PHOTOS_FILE)
+        summaries = _unique(_rows(summaries_folder / SUMMARIES_FILE), by_subject, SUMMARIES_FILE)
+        timezones = _unique(
+            _rows(timezones_folder / TIMEZONES_FILE),
+            lambda r: r["wikivoyage_page_id"],
+            TIMEZONES_FILE,
         )
-        photos = {
-            (r["subject"], r["page_id"], r["ordinal"]): r
-            for r in _rows(photos_folder / PHOTOS_FILE)
+        status = {
+            k: r["check_status"]
+            for k, r in _unique(
+                _rows(checks_folder / CHECKS_FILE), lambda r: r["block_id"], CHECKS_FILE
+            ).items()
         }
-        summaries = {
-            (r["subject"], r["page_id"], r["ordinal"]): r
-            for r in _rows(summaries_folder / SUMMARIES_FILE)
-        }
-        timezones = {r["wikivoyage_page_id"]: r for r in _rows(timezones_folder / TIMEZONES_FILE)}
-        status = {r["block_id"]: r["check_status"] for r in _rows(checks_folder / CHECKS_FILE)}
         block_rows = [
             b
             for b in _rows(blocks_folder / BLOCKS_FILE)
@@ -206,14 +274,18 @@ def run_publish_static(
             (s for s in _rows(blocks_folder / STOPS_FILE) if s["block_id"] in owner_of),
             "block_id",
         )
-        block_costs = {
-            r["block_id"]: r for r in _rows(prices_folder / COSTS_FILE) if r["block_id"] in owner_of
-        }
+        block_costs = _unique(
+            (r for r in _rows(prices_folder / COSTS_FILE) if r["block_id"] in owner_of),
+            lambda r: r["block_id"],
+            COSTS_FILE,
+        )
         days = _group(
             (
                 {**d, "owner": owner_of[d["block_ids"][0]]}
                 for d in _rows(prices_folder / DAY_COSTS_FILE)
-                if d["block_ids"] and all(b in owner_of for b in d["block_ids"])
+                if d["block_ids"]
+                and all(b in owner_of for b in d["block_ids"])
+                and len({owner_of[b] for b in d["block_ids"]}) == 1
             ),
             "owner",
         )
@@ -276,17 +348,25 @@ def run_publish_static(
                         "kind": kind,
                         "city": city["slug"],
                         "subject": subject,
-                        **{k: item["credit"][k] for k in CREDIT_KEYS},
+                        **{k: item["credit"].get(k) for k in CREDIT_KEYS},
                     }
                 )
+        counts["without_hero"] += city["hero"] is None
+        counts["without_summary"] += city["summary"] is None
+        counts["not_ready_published"] += city["tier"] == "not_ready"
         zone = timezones.get(row["wikivoyage_page_id"]) or {}
         if zone.get("timezone") and zone.get("timezone_attribution"):
             notices.add((zone["timezone_attribution"], zone.get("timezone_licence"), None))
-        for listing in place_listings.get(row["wikivoyage_page_id"], []):
-            if listing.get("attribution"):
-                notices.add(
-                    (listing["attribution"], listing.get("licence"), listing.get("licence_url"))
-                )
+        # Place and stop names and points come from Wikivoyage listings: credit those listings.
+        kept = {p["key"] for p in city["places"]}
+        used = {
+            (p["page_id"], p["ordinal"])
+            for p in place_listings.get(row["wikivoyage_page_id"], [])
+            if p["listing_key"] in kept
+        }
+        for b in city["blocks"]:
+            used |= {(s["page_id"], s["ordinal"]) for s in up.stops.get(b["id"], [])}
+        notices |= {notice_of[k] for k in used if k in notice_of}
     index = {"schema_version": SCHEMA_VERSION, "cities": index_cities}
     files["index.json"] = _dump(IndexFile, index, "index.json")
     if len(files["index.json"]) > limits.max_index_bytes:
@@ -323,9 +403,18 @@ def run_publish_static(
             "city files need bundling by country"
         )
 
+    for name, data in files.items():
+        if not name.startswith("cities/") and name != "index.json":
+            if len(data) > limits.max_other_bytes:
+                raise PipelineError(
+                    f"{name} is {len(data)} bytes, over the {limits.max_other_bytes} bytes limit"
+                )
     hashes = {n: hashlib.sha256(d).hexdigest() for n, d in sorted(files.items())}
-    version = hashlib.sha256("".join(f"{n}:{h}\n" for n, h in hashes.items()).encode()).hexdigest()
+    version = version_of(hashes)
     totals = {
+        "without_hero": counts["without_hero"],
+        "without_summary": counts["without_summary"],
+        "not_ready_published": counts["not_ready_published"],
         "cities": len(index_cities),
         "skipped_no_slug": counts["skipped_no_slug"],
         "photos": counts["photos"],
@@ -350,14 +439,27 @@ def run_publish_static(
         "files": {n: {"sha256": hashes[n], "bytes": len(files[n])} for n in hashes},
     }
     files["manifest.json"] = _dump(ManifestFile, manifest, "manifest.json")
+    if len(files["manifest.json"]) > limits.max_other_bytes:
+        raise PipelineError(
+            f"manifest.json is {len(files['manifest.json'])} bytes, over the "
+            f"{limits.max_other_bytes} bytes limit"
+        )
 
+    # Write beside the old site and swap at the end, so a failed write never destroys a good site.
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
-    site = target / "site"
-    if site.exists():
-        shutil.rmtree(site)
-    for name, data in files.items():
-        path = site / API / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-    (site / "_headers").write_bytes(HEADERS.encode("utf-8"))
+    site, staging = target / "site", target / "site.new"
+    try:
+        if staging.exists():
+            shutil.rmtree(staging)
+        for name, data in files.items():
+            path = staging / API / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        (staging / "_headers").write_bytes(HEADERS.encode("utf-8"))
+        if site.exists():
+            shutil.rmtree(site)
+        staging.rename(site)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
     return PublishResult(target, site, totals)

@@ -69,6 +69,49 @@ def test_deploy_refuses_a_site_with_an_extra_file(tmp_path):
         deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
 
 
+def test_deploy_passes_an_absolute_site_path(tmp_path, monkeypatch):
+    site = _site(tmp_path)
+    monkeypatch.chdir(site.parent)
+    run = Recorder()
+    deploy.deploy(Path("site"), project="p", branch=None, confirmed=True, runner=run)
+    command = run.calls[0][0]
+    assert Path(command[command.index("deploy") + 1]).is_absolute()
+
+
+def test_deploy_refuses_a_path_cmd_would_interpret(tmp_path):
+    odd = tmp_path / "a&b"
+    odd.mkdir()
+    with pytest.raises(PipelineError, match="site path"):
+        deploy.deploy(odd, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
+def test_deploy_refuses_manifest_names_that_leave_the_folder(tmp_path):
+    site = _site(tmp_path)
+    path = site / "v1" / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["files"]["../../evil.json"] = {"sha256": "0" * 64, "bytes": 1}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PipelineError, match="not an allowed file name"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
+def test_deploy_refuses_a_changed_version(tmp_path):
+    site = _site(tmp_path)
+    path = site / "v1" / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["version"] = "0" * 64
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(PipelineError, match="version"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
+def test_deploy_refuses_a_changed_headers_file(tmp_path):
+    site = _site(tmp_path)
+    (site / "_headers").write_text("/*\n  X: y\n", encoding="utf-8")
+    with pytest.raises(PipelineError, match="_headers"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
 def test_deploy_refuses_a_missing_manifest(tmp_path):
     with pytest.raises(PipelineError, match="manifest.json"):
         deploy.deploy(tmp_path, project="p", branch=None, confirmed=True, runner=Recorder())

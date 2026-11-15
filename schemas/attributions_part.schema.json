@@ -22,6 +22,18 @@
           "title": "City",
           "type": "string"
         },
+        "history_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "History Url"
+        },
         "kind": {
           "enum": [
             "photo",

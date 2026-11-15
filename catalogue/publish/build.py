@@ -50,11 +50,25 @@ class Upstream:
     counts: Counter = field(default_factory=Counter)
 
 
+def _https(*urls: Any) -> bool:
+    return all(isinstance(u, str) and u.startswith("https://") for u in urls)
+
+
+def _web(url: Any) -> bool:
+    """A licence link may still be an old http:// Creative Commons address; nothing loads it."""
+    return isinstance(url, str) and url.startswith(("https://", "http://"))
+
+
 def photo_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | None:
     photo = (row or {}).get("photo")
     if not photo:
         return None
-    if not (photo.get("licence_name") and photo.get("description_url") and photo.get("thumb_url")):
+    if not (
+        photo.get("licence_name")
+        and (photo.get("author") or photo.get("attribution"))
+        and _https(photo.get("description_url"), photo.get("thumb_url"))
+        and (not photo.get("licence_url") or _web(photo["licence_url"]))
+    ):
         counts["photos_left_out_no_credit"] += 1
         return None
     return {
@@ -76,7 +90,7 @@ def text_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | Non
     if not row or not row.get("summary"):
         return None
     source = row.get("permalink") or row.get("url")
-    if not (row.get("licence") and source and row.get("attribution")):
+    if not (row.get("licence") and row.get("attribution") and _https(source)):
         counts["summaries_left_out_no_credit"] += 1
         return None
     return {

@@ -14,6 +14,7 @@ class PublishLimits:
     max_files: int
     max_file_bytes: int
     max_index_bytes: int = 2 * 1024 * 1024
+    max_other_bytes: int = 20 * 1024 * 1024
     attribution_part_bytes: int = 4 * 1024 * 1024
 
 
@@ -22,7 +23,13 @@ def load_limits(path: Path = LIMITS_PATH) -> PublishLimits:
         table = tomllib.loads(path.read_text(encoding="utf-8"))["limits"]
         values = {
             k: table[k]
-            for k in ("max_files", "max_file_bytes", "max_index_bytes", "attribution_part_bytes")
+            for k in (
+                "max_files",
+                "max_file_bytes",
+                "max_index_bytes",
+                "max_other_bytes",
+                "attribution_part_bytes",
+            )
         }
     except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
         raise PipelineError(f"{path.name} is missing or damaged") from None

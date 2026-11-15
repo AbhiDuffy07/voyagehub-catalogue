@@ -19,13 +19,14 @@ from pydantic import ValidationError
 
 from catalogue.errors import PipelineError
 from catalogue.publish.models import ManifestFile
+from catalogue.publish.site import FILE_NAME, HEADERS, version_of
 
 # Exact pin: the newest wrangler release that was at least 14 days old on 2026-11-15.
 WRANGLER_VERSION = "4.156.0"
 PROJECT_NAME_DEFAULT = "voyagehub-catalogue"
 PROJECT_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$")
 BRANCH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
-ALLOWED_EXTRA = {"_headers"}
+CMD_METACHARACTERS = set('&|<>^%"!')  # npx is npx.cmd on Windows, which cmd.exe parses
 
 
 def verify_site(site: Path) -> None:
@@ -41,20 +42,31 @@ def verify_site(site: Path) -> None:
         ) from None
     recorded = manifest.files
     for name, info in recorded.items():
+        if not FILE_NAME.fullmatch(name):
+            raise PipelineError(f"{name} is not an allowed file name")
+        path = site / "v1" / name
+        if path.is_symlink():
+            raise PipelineError(f"{name} is a symbolic link")
         try:
-            data = (site / "v1" / name).read_bytes()
+            data = path.read_bytes()
         except OSError:
             raise PipelineError(f"{name} is missing from the site folder") from None
         if hashlib.sha256(data).hexdigest() != info.sha256 or len(data) != info.bytes:
             raise PipelineError(f"{name} does not match the manifest; build the site again")
-    present = {
-        p.relative_to(site / "v1").as_posix() for p in (site / "v1").rglob("*") if p.is_file()
-    }
-    for name in sorted(present - set(recorded) - {"manifest.json"}):
-        raise PipelineError(f"{name} is in the site folder but not in the manifest")
-    top = {p.name for p in site.iterdir()} - {"v1"}
-    for name in sorted(top - ALLOWED_EXTRA):
-        raise PipelineError(f"{name} is in the site folder but is not part of the build")
+    if version_of({n: i.sha256 for n, i in recorded.items()}) != manifest.version:
+        raise PipelineError("the manifest version does not match its files; build the site again")
+    for path in (site / "v1").rglob("*"):
+        name = path.relative_to(site / "v1").as_posix()
+        if path.is_symlink():
+            raise PipelineError(f"{name} is a symbolic link")
+        if path.is_file() and name not in recorded and name != "manifest.json":
+            raise PipelineError(f"{name} is in the site folder but not in the manifest")
+    for path in site.iterdir():
+        if path.name not in ("v1", "_headers"):
+            raise PipelineError(f"{path.name} is in the site folder but is not part of the build")
+    headers = site / "_headers"
+    if headers.exists() and headers.read_bytes() != HEADERS.encode("utf-8"):
+        raise PipelineError("_headers does not match the build; build the site again")
 
 
 def deploy(
@@ -71,6 +83,9 @@ def deploy(
         raise PipelineError("the branch name has characters that are not allowed")
     if not confirmed:
         raise PipelineError("deploying publishes the site; run again with --yes to confirm")
+    site = site.resolve()
+    if CMD_METACHARACTERS & set(str(site)):
+        raise PipelineError("the site path has characters a command shell would interpret")
     verify_site(site)
     command = [
         shutil.which("npx") or "npx",

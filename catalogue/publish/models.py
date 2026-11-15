@@ -145,6 +145,7 @@ class AttributionEntry(_Model):
     licence_url: str | None
     source_url: str
     attribution: str
+    history_url: str | None = None
 
 
 class Notice(_Model):

@@ -198,6 +198,22 @@ Offline and fast (seconds): no network, no settings. It reads, each hash-checked
 - **Checks on the inputs:** every folder must come from the same `--dump-date`; the `auto-check` output must have been built from the very `day_blocks.jsonl` read here; the manifest records the hash of the previous `state.json` and of `slugs.json` too. A published city that has lost its slug stays published and is counted (`published_without_slug`).
 - **Known limits:** an attraction sub-article (Agra/Taj Mahal) is not counted as a photographed place of its city; no database is written (B15 maps the tier and publication state).
 
+### `publish-static` and `deploy`
+
+```
+.venv\Scripts\python -m catalogue publish-static --dump-date 20261101 --country IN
+.venv\Scripts\python -m catalogue deploy --site-dir out\publish61101-IN\site --branch preview --yes
+```
+
+`publish-static` is offline (no network, no settings). It reads the `readiness` output and the same hash-checked folders readiness read, plus `out/prices/`, and writes `out/publish/<dump date>[-CC]/site/`, the folder that is deployed. A city is written only when readiness says `published` and it has a slug.
+
+- **Files** (under `v1/`): `cities/<slug>.json` (summary, hero, time zone, places with photo and summary, checked blocks with stops and cost estimate, days, price bands), `index.json` (Home/Explore: slug, title, country, tier, hero), `attributions.json` plus `attributions/part-NNN.json` (every photo and summary with author, licence and link, and the licence notices), `manifest.json` (content `version`, sha256 and size of every file), and `_headers` (cache rules). Checked blocks only; a day that holds an unchecked block or blocks of two cities is left out. Missing values stay empty.
+- **Credit:** a photo or summary without a licence, a credit (author or attribution) or an https source link is left out and counted, never published uncredited.
+- **Schemas:** the files are validated with pydantic models before anything is written; the JSON Schemas are in `schemas/` (`python -m catalogue.publish.schemas` rewrites them, a test fails if they drift).
+- **Checks on the inputs:** every folder is hash-checked, and readiness, auto-check and price-bands must have been built from exactly the files read here.
+- **Limits** (`config/publish_limits.toml`; Cloudflare Pages Free allows 20,000 files and 25 MiB per file): at most 18,000 files, 1 MiB per city file, 2 MiB for `index.json`, 20 MiB for any other file. The build stops with a clear message instead of uploading. A world run will need the index and the cities sharded by country if it passes these.
+- **Deploy:** `deploy` runs `npx --yes wrangler@4.156.0 pages deploy` (exact pin, no shell) only with `--yes` and only if the site folder is exactly what `publish-static` built. Sign in once with `npx wrangler@4.156.0 login` (browser); no token is read or stored. The GitHub Actions token is B14.
+
 ## Known follow-ups
 
 Small items found in review of `fetch-listings`, not yet done:

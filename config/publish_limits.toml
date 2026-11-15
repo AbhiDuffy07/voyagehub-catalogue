@@ -6,4 +6,5 @@
 max_files = 18000
 max_file_bytes = 1048576          # one city file: hard stop at 1 MiB (target is far smaller)
 max_index_bytes = 2097152         # index.json: hard stop at 2 MiB (then it must be sharded by country)
+max_other_bytes = 20971520        # attribution parts, attributions.json, manifest.json: hard stop at 20 MiB
 attribution_part_bytes = 4194304  # attributions are split into parts of about this size

@@ -86,7 +86,10 @@ def build(tmp_path: Path) -> dict:
     photos = [
         ph("article", 1, hero=True),
         *(ph("listing", 1, i) for i in (1, 2, 3)),
-        rf.photo("listing", 1, 4, has=False),
+        {
+            **rf.photo("listing", 1, 4),
+            "photo": {"commons_file": "bad.jpg", "thumb_url": "https://t/x"},
+        },
         ph("article", 2, hero=True),
         *(ph("listing", 20, i, hero=(i == 1)) for i in (1, 2, 3)),
     ]
@@ -114,6 +117,7 @@ def build(tmp_path: Path) -> dict:
             "day_trip": False,
         },
         {**rf.block("agra-am", 2, "2", "morning"), "title": "Morning", "intro": "", "minutes": 90},
+        {**rf.block("jaipur-flagged", 1, "1", "morning"), "title": "Held back", "minutes": 60},
     ]
     stops = [
         {
@@ -153,6 +157,7 @@ def build(tmp_path: Path) -> dict:
     checks = [
         {"block_id": "jaipur-full", "check_status": "checked"},
         {"block_id": "agra-am", "check_status": "checked"},
+        {"block_id": "jaipur-flagged", "check_status": "flagged"},
     ]
     rf.manifest(
         chk,
@@ -221,11 +226,12 @@ def build(tmp_path: Path) -> dict:
     ]
     costs = [
         {
-            "block_id": "jaipur-full",
+            "block_id": block_id,
             "label": "estimate",
             "foreigner": estimate,
             "resident": estimate,
         }
+        for block_id in ("jaipur-full", "jaipur-flagged")
     ]
     days = [
         {
@@ -234,7 +240,21 @@ def build(tmp_path: Path) -> dict:
             "label": "estimate",
             "foreigner": estimate,
             "resident": estimate,
-        }
+        },
+        {
+            "day_id": "day:with-flagged",
+            "block_ids": ["jaipur-full", "jaipur-flagged"],
+            "label": "estimate",
+            "foreigner": estimate,
+            "resident": estimate,
+        },
+        {
+            "day_id": "day:two-cities",
+            "block_ids": ["jaipur-full", "agra-am"],
+            "label": "estimate",
+            "foreigner": estimate,
+            "resident": estimate,
+        },
     ]
     rf.manifest(
         prices,
@@ -242,6 +262,12 @@ def build(tmp_path: Path) -> dict:
             "city_price_bands.jsonl": rf.jsonl(prices / "city_price_bands.jsonl", bands),
             "block_costs.jsonl": rf.jsonl(prices / "block_costs.jsonl", costs),
             "day_costs.jsonl": rf.jsonl(prices / "day_costs.jsonl", days),
+        },
+        inputs_sha256={
+            "listings.jsonl": rf.sha(lis / "listings.jsonl"),
+            "day_blocks.jsonl": rf.sha(blk / "day_blocks.jsonl"),
+            "day_block_stops.jsonl": rf.sha(blk / "day_block_stops.jsonl"),
+            "block_checks.jsonl": rf.sha(chk / "block_checks.jsonl"),
         },
     )
     return {
