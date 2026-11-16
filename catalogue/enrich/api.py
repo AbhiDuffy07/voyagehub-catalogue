@@ -1,8 +1,11 @@
 """One call to a MediaWiki Action API, with the etiquette those servers ask for.
 
 - `maxlag=5`: when the database replicas are behind, the server answers HTTP 200 with an
-  `error.code` of `maxlag` and a `Retry-After` header. We wait that long and try again, a bounded
-  number of times, and stop with a message instead of hanging.
+  `error.code` of `maxlag` and a `Retry-After` header. We wait at least that long (the waits grow
+  from 5 s up to 60 s; a longer Retry-After is honoured while it fits the budget) and try again,
+  for up to 20 minutes of waiting in total, then stop with a message instead of hanging.
+  Unattended runs need that patience: a lag spell on Wikidata can last many minutes. Each wait
+  prints one short line (host and counts only).
 - Any other `error` object in the body becomes a PipelineError that shows the error code only,
   cleaned of anything but letters, digits, dash and underscore. The server's free-text `info` is
   never printed (the repository is public and so are its logs).
@@ -20,9 +23,9 @@ from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 
 MAX_LAG = 5
-MAX_LAG_RETRIES = 5
-DEFAULT_LAG_WAIT = 5.0
-MAX_LAG_WAIT = 300.0
+DEFAULT_LAG_WAIT = 5.0  # first wait, and the wait when the reply has no Retry-After
+MAX_LAG_WAIT = 60.0  # the growing back-off never goes above this per wait
+MAX_LAG_BUDGET = 1200.0  # seconds of waiting we are willing to spend on one request
 _SAFE_CODE = re.compile(r"[^A-Za-z0-9_-]")
 
 
@@ -45,7 +48,9 @@ def api_get(
     """GET one Action API request and return the decoded JSON object."""
     host = httpx.URL(url).host
     full = {**params, "format": "json", "maxlag": MAX_LAG}
-    for attempt in range(MAX_LAG_RETRIES + 1):
+    waited = 0.0
+    lag_replies = 0
+    while True:
         response = client.get(url, params=full)
         try:
             body = response.json()
@@ -59,10 +64,15 @@ def api_get(
         code = error.get("code") if isinstance(error, dict) else None
         if code != "maxlag":
             raise PipelineError(f"{host} API error: {_safe_code(code)}")
-        wait = _wait_seconds(response)
-        if wait > MAX_LAG_WAIT:
-            raise PipelineError(f"{host} asked for a {wait:.0f} s wait (database lag); stopping")
-        if attempt == MAX_LAG_RETRIES:
+        asked = _wait_seconds(response)
+        wait = max(asked, min(DEFAULT_LAG_WAIT * 2**lag_replies, MAX_LAG_WAIT))
+        if waited + wait > MAX_LAG_BUDGET:
             raise PipelineError(f"{host} is still lagging after retries; try again later")
+        lag_replies += 1
+        print(
+            f"{host} is lagging; waiting {wait:.0f} s "
+            f"(retry {lag_replies}, {waited + wait:.0f} of {MAX_LAG_BUDGET:.0f} s used)",
+            flush=True,
+        )
         sleep(wait)
-    raise AssertionError("unreachable: the loop always returns or raises")  # pragma: no cover
+        waited += wait
