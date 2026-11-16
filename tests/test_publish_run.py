@@ -526,3 +526,24 @@ def test_the_landing_page_is_the_same_in_every_build(tmp_path):
     assert (first.site_dir / "index.html").read_bytes() == (
         second.site_dir / "index.html"
     ).read_bytes()
+
+
+def test_a_photo_in_the_hero_rejection_list_is_no_hero_but_stays_a_place_photo(tmp_path):
+    from catalogue.publish import build as b
+    from catalogue.publish import hero
+
+    heroes = tmp_path / "rejected_heroes.csv"
+    heroes.write_text("commons_file,reason\nX.jpg,a bus stand\n", encoding="utf-8")
+    rules = hero.load_hero_rules(heroes_path=heroes)
+    row = {"hero_quality": True, "photo": publishfixture.CREDIT_PHOTO}
+
+    assert hero.hero_problem(row, rules) == "override"
+    assert b.photo_of(row, b.Counter(), rules) is not None  # still fine as a place photo
+
+
+def test_the_committed_hero_rejection_list_loads_and_every_row_has_a_reason():
+    from catalogue.photos.select import load_rejected_files
+    from catalogue.publish import hero
+
+    assert load_rejected_files(hero.HEROES_PATH)  # raises on a missing reason or a bad column
+    assert not load_rejected_files(hero.HEROES_PATH) & load_rejected_files()  # kept apart
