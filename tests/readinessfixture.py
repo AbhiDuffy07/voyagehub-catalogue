@@ -16,6 +16,9 @@ from catalogue.readiness.run import run_readiness
 
 TODAY = date(2026, 11, 15)
 PHOTO = {
+    "licence_name": "CC BY-SA 4.0",
+    "description_url": "https://commons.wikimedia.org/wiki/File:X.jpg",
+    "thumb_url": "https://thumb.example/X.jpg",
     "commons_file": "X.jpg",
     "author": "Gerd Eichmann",
     "attribution": "Gerd Eichmann, CC BY-SA 4.0",
@@ -61,8 +64,9 @@ def listing(pid, ordinal, owner, kind="see", duplicate_of=None):
     }
 
 
-def photo(subject, pid, ordinal=0, *, hero=False, has=True, bad_author=False):
+def photo(subject, pid, ordinal=0, *, hero=False, has=True, bad_author=False, edits=None):
     credit = {**PHOTO, "author": "myself", "attribution": "myself"} if bad_author else PHOTO
+    credit = {**credit, **(edits or {})}
     return {
         "subject": subject,
         "page_id": pid,
@@ -83,8 +87,16 @@ def block(block_id, owner, slug, slot, basis="kind"):
 
 
 def build(
-    tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2, tag="", bad_author=()
+    tmp_path: Path,
+    *,
+    summaries=(1, 2, 5),
+    blocks_rules=2,
+    checks_rules=2,
+    tag="",
+    bad_author=(),
+    photo_edits=None,
 ):
+    edits = photo_edits or {}  # {(page_id, ordinal): changes to that photo}
     root = tmp_path / f"world{tag}"
     discover = root / "discover"
     articles = [
@@ -113,8 +125,11 @@ def build(
     )
 
     photos = [
-        photo("article", 1, hero=True),
-        *(photo("listing", 1, i, bad_author=(1, i) in bad_author) for i in (1, 2, 3)),
+        photo("article", 1, hero=True, edits=edits.get((1, 0))),
+        *(
+            photo("listing", 1, i, bad_author=(1, i) in bad_author, edits=edits.get((1, i)))
+            for i in (1, 2, 3)
+        ),
         photo("listing", 1, 4, has=False),
         photo("article", 2),
         *(photo("listing", 20, i, hero=(i == 1)) for i in (1, 2, 3, 4)),
@@ -205,7 +220,7 @@ def run(tmp_path, **overrides):
         **{
             k: overrides.pop(k)
             for k in list(overrides)
-            if k in ("summaries", "blocks_rules", "checks_rules", "bad_author")
+            if k in ("summaries", "blocks_rules", "checks_rules", "bad_author", "photo_edits")
         },
     )
     kwargs.update(overrides)

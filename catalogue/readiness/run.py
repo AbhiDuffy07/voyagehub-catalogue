@@ -40,7 +40,8 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
-from catalogue.publish.hero import HeroRules, author_problem, hero_problem, load_hero_rules
+from catalogue.publish.build import photo_of
+from catalogue.publish.hero import HeroRules, hero_problem, load_hero_rules
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -341,13 +342,15 @@ def run_readiness(
     hero: Counter[int] = Counter()
     places: Counter[int] = Counter()
     unowned_photos = 0
-    # The same rules publish-static uses: a place photo that fails the author rule is not published,
-    # and a photo that may not be a hero (size, rejection lists, collage name, author) is no hero.
+    # The very predicates publish-static uses: a photo it would leave out (no credit, a bad author)
+    # is no photographed place, and a photo that may not be a hero (size, rejection lists, collage
+    # name, author) is no hero.
     photo_rules = hero_rules if hero_rules is not None else load_hero_rules()
     try:
         for r in _rows(photos_folder / PHOTOS_FILE):
             if not r.get("photo"):
                 continue
+            published = photo_of(r, Counter(), photo_rules) is not None
             if r["subject"] == "article":
                 owner = r["page_id"]
             else:
@@ -355,10 +358,10 @@ def run_readiness(
                 if owner is None:
                     unowned_photos += 1  # a photo of a listing that is not a place
                     continue
-                if author_problem(r["photo"], photo_rules):
-                    continue  # not published, so not a photographed place
+                if not published:
+                    continue  # publish-static leaves it out, so it is no photographed place
                 places[owner] += 1
-            hero[owner] += hero_problem(r, photo_rules) is None
+            hero[owner] += published and hero_problem(r, photo_rules) is None
     except (KeyError, TypeError):
         raise _damaged(PHOTOS_FILE) from None
 
