@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from catalogue.errors import PipelineError
 from catalogue.publish.models import ManifestFile
-from catalogue.publish.site import FILE_NAME, HEADERS, version_of
+from catalogue.publish.site import FILE_NAME, HEADERS, LANDING_PAGE, version_of
 
 # Exact pin: the newest wrangler release that was at least 14 days old on 2026-11-15.
 WRANGLER_VERSION = "4.156.0"
@@ -63,11 +63,14 @@ def verify_site(site: Path) -> None:
         if path.is_file() and name not in recorded and name != "manifest.json":
             raise PipelineError(f"{name} is in the site folder but not in the manifest")
     for path in site.iterdir():
-        if path.name not in ("v1", "_headers"):
+        if path.name not in ("v1", "_headers", "index.html"):
             raise PipelineError(f"{path.name} is in the site folder but is not part of the build")
     headers = site / "_headers"
     if headers.exists() and headers.read_bytes() != HEADERS.encode("utf-8"):
         raise PipelineError("_headers does not match the build; build the site again")
+    landing = site / "index.html"
+    if landing.exists() and landing.read_bytes() != LANDING_PAGE.encode("utf-8"):
+        raise PipelineError("index.html does not match the build; build the site again")
 
 
 def deploy(

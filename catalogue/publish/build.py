@@ -15,7 +15,7 @@ from catalogue.publish.getting_around import (
     load_content_rules,
     load_ride_apps,
 )
-from catalogue.publish.hero import HeroRules, hero_problem, load_hero_rules
+from catalogue.publish.hero import HeroRules, author_problem, hero_problem, load_hero_rules
 from catalogue.publish.models import SCHEMA_VERSION
 
 COST_FIELDS = (
@@ -71,7 +71,11 @@ def _web(url: Any) -> bool:
     return isinstance(url, str) and url.startswith(("https://", "http://"))
 
 
-def photo_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | None:
+def photo_of(
+    row: dict[str, Any] | None, counts: Counter, rules: HeroRules | None = None
+) -> dict[str, Any] | None:
+    """The published form of a photo row, or None. With `rules`, a photo whose author fails the
+    author rule is left out too and counted (place photos; a hero is checked by hero_problem)."""
     photo = (row or {}).get("photo")
     if not photo:
         return None
@@ -82,6 +86,9 @@ def photo_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | No
         and (not photo.get("licence_url") or _web(photo["licence_url"]))
     ):
         counts["photos_left_out_no_credit"] += 1
+        return None
+    if rules is not None and author_problem(photo, rules):
+        counts["photos_left_out_bad_author"] += 1
         return None
     thumb_width, width = photo.get("thumb_width"), photo.get("width")
     if isinstance(thumb_width, int) and isinstance(width, int) and 0 < width < thumb_width:
@@ -132,9 +139,9 @@ def _cost(pair: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _place(listing: dict[str, Any], up: Upstream, is_stop: bool) -> dict[str, Any] | None:
     key = ("listing", listing["page_id"], listing["ordinal"])
-    photo = photo_of(up.photos.get(key), up.counts)
+    photo = photo_of(up.photos.get(key), up.counts, up.hero_rules)
     if photo is None and not is_stop:
-        return None  # a place is a photographed place (B12 counts the same) or a block stop
+        return None  # a photographed place, as readiness counts it, or a block stop
     point = _point(listing.get("lat"), listing.get("long"))
     return {
         "key": listing["listing_key"],

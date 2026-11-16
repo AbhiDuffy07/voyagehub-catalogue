@@ -15,7 +15,14 @@ from pathlib import Path
 from catalogue.readiness.run import run_readiness
 
 TODAY = date(2026, 11, 15)
-PHOTO = {"commons_file": "X.jpg"}
+PHOTO = {
+    "licence_name": "CC BY-SA 4.0",
+    "description_url": "https://commons.wikimedia.org/wiki/File:X.jpg",
+    "thumb_url": "https://thumb.example/X.jpg",
+    "commons_file": "X.jpg",
+    "author": "Gerd Eichmann",
+    "attribution": "Gerd Eichmann, CC BY-SA 4.0",
+}
 
 
 def sha(path: Path) -> str:
@@ -47,8 +54,9 @@ def article(pid, title, kind="city", status="usable", country="IN"):
     }
 
 
-def listing(pid, ordinal, owner, kind="see", duplicate_of=None):
+def listing(pid, ordinal, owner, kind="see", duplicate_of=None, name=None):
     return {
+        "name": f"Place {pid}-{ordinal}" if name is None else name,
         "page_id": pid,
         "ordinal": ordinal,
         "owner_page_id": owner,
@@ -57,12 +65,14 @@ def listing(pid, ordinal, owner, kind="see", duplicate_of=None):
     }
 
 
-def photo(subject, pid, ordinal=0, *, hero=False, has=True):
+def photo(subject, pid, ordinal=0, *, hero=False, has=True, bad_author=False, edits=None):
+    credit = {**PHOTO, "author": "myself", "attribution": "myself"} if bad_author else PHOTO
+    credit = {**credit, **(edits or {})}
     return {
         "subject": subject,
         "page_id": pid,
         "ordinal": ordinal,
-        "photo": PHOTO if has else None,
+        "photo": credit if has else None,
         "hero_quality": hero and has,
     }
 
@@ -77,7 +87,18 @@ def block(block_id, owner, slug, slot, basis="kind"):
     }
 
 
-def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2, tag=""):
+def build(
+    tmp_path: Path,
+    *,
+    summaries=(1, 2, 5),
+    blocks_rules=2,
+    checks_rules=2,
+    tag="",
+    bad_author=(),
+    photo_edits=None,
+    unnamed=(),
+):
+    edits = photo_edits or {}  # {(page_id, ordinal): changes to that photo}
     root = tmp_path / f"world{tag}"
     discover = root / "discover"
     articles = [
@@ -91,7 +112,7 @@ def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2
     articles_hash = jsonl(discover / "articles.jsonl", articles)
 
     listings = [
-        *(listing(1, i, 1) for i in (1, 2, 3, 4)),
+        *(listing(1, i, 1, name="  " if (1, i) in unnamed else None) for i in (1, 2, 3, 4)),
         *(listing(20, i, 2) for i in (1, 2, 3)),  # a district's listings belong to Agra
         listing(20, 4, 2, duplicate_of="see:x"),  # a duplicate is never a place
         *(listing(3, i, 3) for i in (1, 2, 3)),
@@ -106,8 +127,11 @@ def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2
     )
 
     photos = [
-        photo("article", 1, hero=True),
-        *(photo("listing", 1, i) for i in (1, 2, 3)),
+        photo("article", 1, hero=True, edits=edits.get((1, 0))),
+        *(
+            photo("listing", 1, i, bad_author=(1, i) in bad_author, edits=edits.get((1, i)))
+            for i in (1, 2, 3)
+        ),
         photo("listing", 1, 4, has=False),
         photo("article", 2),
         *(photo("listing", 20, i, hero=(i == 1)) for i in (1, 2, 3, 4)),
@@ -198,7 +222,8 @@ def run(tmp_path, **overrides):
         **{
             k: overrides.pop(k)
             for k in list(overrides)
-            if k in ("summaries", "blocks_rules", "checks_rules")
+            if k
+            in ("summaries", "blocks_rules", "checks_rules", "bad_author", "photo_edits", "unnamed")
         },
     )
     kwargs.update(overrides)

@@ -10,7 +10,7 @@ collage_words = ["montage", "collage", "compilation", "composite", "mosaic", "ic
 # e-mail address (never published) is not.
 bad_author_phrases = [
   "see above", "see below", "see description", "see file", "see source", "compilation", "unknown",
-  "( talk", "(talk",
+  "( talk", "(talk", "myself",
 ]
 max_author_chars = 100
 

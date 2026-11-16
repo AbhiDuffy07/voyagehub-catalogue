@@ -40,6 +40,15 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
+from catalogue.photos.select import REJECTED_PATH
+from catalogue.publish.build import photo_of
+from catalogue.publish.hero import (
+    CONTENT_PATH,
+    HEROES_PATH,
+    HeroRules,
+    hero_problem,
+    load_hero_rules,
+)
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -243,6 +252,13 @@ def _report(totals: dict[str, Any], dump_date: str, rules: ReadinessRules) -> st
     return "\n".join(lines)
 
 
+def _rule_file_hashes() -> dict[str, str]:
+    """Hashes of the rule and override files that decide which photos count (they change the
+    result without being run inputs), so two runs that differ only there can be told apart."""
+    paths = (HEROES_PATH, REJECTED_PATH, CONTENT_PATH)
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths if p.is_file()}
+
+
 def run_readiness(
     *,
     listings_folder: Path,
@@ -259,6 +275,7 @@ def run_readiness(
     previous_folder: Path | None = None,
     rules: ReadinessRules | None = None,
     slugs_path: Path = SLUGS_PATH,
+    hero_rules: HeroRules | None = None,
 ) -> ReadinessResult:
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_readiness_rules()
@@ -321,7 +338,9 @@ def run_readiness(
         place_owner = {
             (r["page_id"], r["ordinal"]): r["owner_page_id"]
             for r in _rows(listings_folder / LISTINGS_FILE)
-            if r["kind"] in rules.place_sections and not r["duplicate_of"]
+            if r["kind"] in rules.place_sections
+            and not r["duplicate_of"]
+            and (r.get("name") or "").strip()  # publish-static leaves an unnamed listing out
         }
         has_summary = {
             r["page_id"]
@@ -339,19 +358,25 @@ def run_readiness(
     hero: Counter[int] = Counter()
     places: Counter[int] = Counter()
     unowned_photos = 0
+    # The very predicates publish-static uses: a photo it would leave out (no credit, a bad author)
+    # is no photographed place, and a photo that may not be a hero (size, rejection lists, collage
+    # name, author) is no hero.
+    photo_rules = hero_rules if hero_rules is not None else load_hero_rules()
     try:
         for r in _rows(photos_folder / PHOTOS_FILE):
             if not r.get("photo"):
                 continue
-            if r["subject"] == "article":
-                owner = r["page_id"]
-            else:
-                owner = place_owner.get((r["page_id"], r["ordinal"]))
-                if owner is None:
-                    unowned_photos += 1  # a photo of a listing that is not a place
-                    continue
+            is_article = r["subject"] == "article"
+            owner = r["page_id"] if is_article else place_owner.get((r["page_id"], r["ordinal"]))
+            if owner is None:
+                unowned_photos += 1  # a photo of a listing that is not a place (or has no name)
+                continue
+            published = photo_of(r, Counter(), photo_rules) is not None
+            if not is_article:
+                if not published:
+                    continue  # publish-static leaves it out, so it is no photographed place
                 places[owner] += 1
-            hero[owner] += bool(r.get("hero_quality"))
+            hero[owner] += published and hero_problem(r, photo_rules) is None
     except (KeyError, TypeError):
         raise _damaged(PHOTOS_FILE) from None
 
@@ -511,6 +536,7 @@ def run_readiness(
             "country_filter": country_filter,
             "generated_on": today.isoformat(),
             "inputs_sha256": hashes,
+            "rules_sha256": _rule_file_hashes(),
             "totals": totals,
             "outputs_sha256": {
                 name: hashlib.sha256((target / name).read_bytes()).hexdigest()

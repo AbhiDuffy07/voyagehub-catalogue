@@ -527,3 +527,61 @@ def test_a_huge_number_is_ambiguous_not_a_crash(raw):
     result = price(raw)
 
     assert (result.status, result.entries, result.reason) == ("unparsed", [], "ambiguous_number")
+
+
+def _tiers(result):
+    return {e["audience"]: e["amount_minor"] for e in result.entries if e["label"] is None}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "₹50/200 for Indians/foreigners",
+        "₹50/₹200 for Indians/foreigners",
+        "₹ 50/200 for Indian/foreigner",
+        "Indian/foreigner: ₹50/200",
+        "₹ 50/200 Indians/foreigners",
+        "₹ 50/200, Indians/foreigners",
+        "₹50/200 (Indian/foreigners)",
+    ],
+)
+def test_a_slash_pair_for_residents_and_foreigners_is_two_tiers(raw):
+    result = price(raw)
+
+    assert (result.status, _tiers(result)) == ("parsed", {"resident": 5000, "foreigner": 20000})
+
+
+def test_a_slash_pair_also_reads_non_resident_words():
+    result = price("₹20/150 for Indian/non-Indian")
+
+    assert (result.status, _tiers(result)) == ("parsed", {"resident": 2000, "foreigner": 15000})
+
+
+def test_a_slash_pair_keeps_the_text_after_it_as_its_own_part():
+    result = price("₹10/100 for Indians/foreigners. Free for children below 5")
+
+    tiers = _tiers(result)
+    assert tiers["resident"] == 1000 and tiers["foreigner"] == 10000
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Sgl/Dbl ₹600/850",
+        "₹50/200 for adults/children",
+        "₹50/200",
+        "₹50/200/300 for Indians/foreigners",
+        "₹50/$200 for Indians/foreigners",
+    ],
+)
+def test_any_other_slash_pair_is_not_split_into_resident_and_foreigner_tiers(raw):
+    # Room types, adults/children, three amounts or two currencies: which amount belongs to which
+    # group would be a guess, so the old reading stays.
+    assert "foreigner" not in {e["audience"] for e in price(raw).entries}
+
+
+def test_a_slash_pair_without_a_currency_symbol_uses_the_country_currency():
+    result = price("50/200 for Indians/foreigners")
+
+    assert _tiers(result) == {"resident": 5000, "foreigner": 20000}
+    assert {e["currency"] for e in result.entries} == {"INR"}

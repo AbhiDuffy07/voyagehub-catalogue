@@ -137,3 +137,22 @@ def test_committed_schemas_match_the_models():
     for name, model in SCHEMAS.items():
         committed = json.loads((root / f"{name}.schema.json").read_text(encoding="utf-8"))
         assert committed == model.model_json_schema(), name
+
+
+def test_deploy_accepts_the_landing_page_and_refuses_a_changed_one(tmp_path):
+    site = _site(tmp_path)
+    assert (site / "index.html").is_file()
+    runner = Recorder()
+    deploy.deploy(site, project="p", branch=None, confirmed=True, runner=runner)
+    assert len(runner.calls) == 1
+
+    (site / "index.html").write_text("<p>changed</p>", encoding="utf-8")
+    with pytest.raises(PipelineError, match="index.html"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
+def test_deploy_still_refuses_any_other_file_at_the_site_root(tmp_path):
+    site = _site(tmp_path)
+    (site / "other.html").write_text("x", encoding="utf-8")
+    with pytest.raises(PipelineError, match="other.html"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())

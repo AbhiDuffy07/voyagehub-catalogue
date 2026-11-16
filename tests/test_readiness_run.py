@@ -315,3 +315,83 @@ def test_a_previous_state_with_another_schema_version_is_refused(tmp_path):
     state_path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(PipelineError, match="state.json"):
         run(tmp_path, tag="2", previous_folder=first.output_dir)
+
+
+def test_a_place_photo_that_fails_the_author_rule_is_not_a_photographed_place(tmp_path):
+    # publish-static leaves such a photo out, so readiness must not count it either
+    result, _ = run(tmp_path, bad_author=((1, 1),))
+    jaipur = rows(result)[1]
+
+    assert jaipur["photographed_places"] == 2
+    assert "photographed_places" in jaipur["failed_rules"]
+    assert jaipur["tier"] != "plannable"
+
+
+def _hero_rules_rejecting(tmp_path, name="X.jpg"):
+    from catalogue.publish.hero import load_hero_rules
+
+    heroes = tmp_path / "rejected_heroes.csv"
+    heroes.write_text(f"commons_file,reason\n{name},weak as a hero\n", encoding="utf-8")
+    return load_hero_rules(heroes_path=heroes)
+
+
+def test_a_city_whose_only_hero_photos_are_on_the_hero_rejection_list_is_not_ready(tmp_path):
+    result, _ = run(tmp_path, hero_rules=_hero_rules_rejecting(tmp_path))
+    jaipur = rows(result)[1]
+
+    assert jaipur["hero_photos"] == 0
+    assert "hero_photo" in jaipur["failed_rules"]
+    assert jaipur["tier"] == "not_ready"
+
+
+def test_hero_rejections_do_not_change_the_photographed_places(tmp_path):
+    result, _ = run(tmp_path, hero_rules=_hero_rules_rejecting(tmp_path))
+
+    assert rows(result)[1]["photographed_places"] == 3
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        {"commons_file": "Jaipur Montage.jpg"},  # a collage by its file name
+        {"author": "myself", "attribution": "myself"},  # not an author
+    ],
+)
+def test_a_hero_that_publish_would_refuse_for_its_name_or_author_is_no_hero(tmp_path, edits):
+    result, _ = run(tmp_path, photo_edits={(1, 0): edits})
+    jaipur = rows(result)[1]
+
+    assert jaipur["hero_photos"] == 0 and "hero_photo" in jaipur["failed_rules"]
+
+
+def test_a_place_photo_without_a_licence_or_https_link_is_no_photographed_place(tmp_path):
+    # publish-static leaves such a photo out (no credit), so readiness must not count it
+    result, _ = run(
+        tmp_path, photo_edits={(1, 1): {"licence_name": ""}, (1, 2): {"thumb_url": "http://x/y"}}
+    )
+
+    assert rows(result)[1]["photographed_places"] == 1
+
+
+def test_a_photo_of_an_unnamed_listing_is_no_photographed_place(tmp_path):
+    # publish-static leaves a listing without a name out, with its photo
+    result, _ = run(tmp_path, unnamed=((1, 1),))
+
+    assert rows(result)[1]["photographed_places"] == 2
+
+
+def test_a_place_photo_with_a_non_web_licence_link_is_no_photographed_place(tmp_path):
+    result, _ = run(tmp_path, photo_edits={(1, 1): {"licence_url": "ftp://x/y"}})
+
+    assert rows(result)[1]["photographed_places"] == 2
+
+
+def test_the_manifest_records_the_rule_files_that_decide_which_photos_count(tmp_path):
+    result, _ = run(tmp_path)
+    manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    assert set(manifest["rules_sha256"]) == {
+        "rejected_heroes.csv",
+        "rejected_photos.csv",
+        "publish_content.toml",
+    }
