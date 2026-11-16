@@ -3,6 +3,7 @@ import json
 import pytest
 
 from catalogue.errors import PipelineError
+from catalogue.publish import site as site_module
 from catalogue.publish.limits import PublishLimits
 from catalogue.publish.run import run_publish_static
 from tests import publishfixture
@@ -505,3 +506,23 @@ def test_an_author_that_says_myself_may_not_be_a_hero():
     }
 
     assert hero.hero_problem(row, rules) == "author"
+
+
+def test_the_site_root_has_a_small_landing_page_that_links_the_credits(tmp_path):
+    result, _ = _build(tmp_path)
+    page = (result.site_dir / "index.html").read_text(encoding="utf-8")
+
+    assert "VoyageHub catalogue: city data for the VoyageHub app, with credits" in page
+    assert 'href="/v1/attributions.json"' in page
+    assert "<script" not in page and "http://" not in page and "@" not in page
+    assert page == site_module.LANDING_PAGE
+    assert len(page.encode("utf-8")) < 4096
+
+
+def test_the_landing_page_is_the_same_in_every_build(tmp_path):
+    first, kwargs = _build(tmp_path)
+    second = run_publish_static(**{**kwargs, "out_dir": tmp_path / "publish2"})
+
+    assert (first.site_dir / "index.html").read_bytes() == (
+        second.site_dir / "index.html"
+    ).read_bytes()
