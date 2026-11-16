@@ -325,3 +325,28 @@ def test_a_place_photo_that_fails_the_author_rule_is_not_a_photographed_place(tm
     assert jaipur["photographed_places"] == 2
     assert "photographed_places" in jaipur["failed_rules"]
     assert jaipur["tier"] != "plannable"
+
+
+def test_a_city_whose_only_hero_photos_are_on_the_hero_rejection_list_is_not_ready(tmp_path):
+    from catalogue.publish.hero import load_hero_rules
+
+    heroes = tmp_path / "rejected_heroes.csv"
+    heroes.write_text("commons_file,reason\nX.jpg,weak as a hero\n", encoding="utf-8")
+
+    result, _ = run(tmp_path, hero_rules=load_hero_rules(heroes_path=heroes))
+    jaipur = rows(result)[1]
+
+    assert jaipur["hero_photos"] == 0
+    assert "hero_photo" in jaipur["failed_rules"]
+    assert jaipur["tier"] == "not_ready"
+
+
+def test_hero_rejections_do_not_change_the_photographed_places(tmp_path):
+    from catalogue.publish.hero import load_hero_rules
+
+    heroes = tmp_path / "rejected_heroes.csv"
+    heroes.write_text("commons_file,reason\nX.jpg,weak as a hero\n", encoding="utf-8")
+
+    result, _ = run(tmp_path, hero_rules=load_hero_rules(heroes_path=heroes))
+
+    assert rows(result)[1]["photographed_places"] == 3

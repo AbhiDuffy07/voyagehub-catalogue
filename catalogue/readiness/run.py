@@ -40,7 +40,7 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
-from catalogue.publish.hero import author_problem, load_hero_rules
+from catalogue.publish.hero import HeroRules, author_problem, hero_problem, load_hero_rules
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -260,6 +260,7 @@ def run_readiness(
     previous_folder: Path | None = None,
     rules: ReadinessRules | None = None,
     slugs_path: Path = SLUGS_PATH,
+    hero_rules: HeroRules | None = None,
 ) -> ReadinessResult:
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_readiness_rules()
@@ -340,7 +341,9 @@ def run_readiness(
     hero: Counter[int] = Counter()
     places: Counter[int] = Counter()
     unowned_photos = 0
-    author_rules = load_hero_rules()  # publish-static leaves out a place photo that fails them
+    # The same rules publish-static uses: a place photo that fails the author rule is not published,
+    # and a photo that may not be a hero (size, rejection lists, collage name, author) is no hero.
+    photo_rules = hero_rules if hero_rules is not None else load_hero_rules()
     try:
         for r in _rows(photos_folder / PHOTOS_FILE):
             if not r.get("photo"):
@@ -352,10 +355,10 @@ def run_readiness(
                 if owner is None:
                     unowned_photos += 1  # a photo of a listing that is not a place
                     continue
-                if author_problem(r["photo"], author_rules):
+                if author_problem(r["photo"], photo_rules):
                     continue  # not published, so not a photographed place
                 places[owner] += 1
-            hero[owner] += bool(r.get("hero_quality"))
+            hero[owner] += hero_problem(r, photo_rules) is None
     except (KeyError, TypeError):
         raise _damaged(PHOTOS_FILE) from None
 
