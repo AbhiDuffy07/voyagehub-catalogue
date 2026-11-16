@@ -147,3 +147,107 @@ def test_a_json_body_that_is_not_an_object_is_a_safe_error(client):
     respx.get(URL).mock(return_value=httpx.Response(200, json=[1, 2]))
     with pytest.raises(PipelineError):
         api_get(client, URL, {"action": "query"})
+
+
+def typed_lag_reply(lag_type, lag=412.5, wait="5"):
+    error = {"code": "maxlag", "info": "Waiting for 10.0.0.1: secret lagged", "lag": lag}
+    if lag_type is not None:
+        error["type"] = lag_type
+    return httpx.Response(200, headers={"Retry-After": wait}, json={"error": error})
+
+
+@respx.mock
+def test_a_db_lag_reply_keeps_the_backoff_and_keeps_maxlag(client):
+    waits = []
+    route = respx.get(URL).mock(
+        side_effect=[typed_lag_reply("db", 8.0), httpx.Response(200, json={"ok": 1})]
+    )
+    assert api_get(client, URL, {"action": "query"}, sleep=waits.append) == {"ok": 1}
+    assert waits == [5.0]
+    assert all(c.request.url.params["maxlag"] == "5" for c in route.calls)
+
+
+@pytest.mark.parametrize("lag_type", [None, "", 7, ["db"], "!!!", "DB", " Db "])
+@respx.mock
+def test_a_missing_or_odd_lag_type_is_treated_as_db(client, lag_type):
+    waits = []
+    route = respx.get(URL).mock(
+        side_effect=[typed_lag_reply(lag_type), httpx.Response(200, json={"ok": 1})]
+    )
+    api_get(client, URL, {"action": "query"}, sleep=waits.append)
+    assert waits == [5.0]
+    assert "maxlag" in route.calls.last.request.url.params
+
+
+@respx.mock
+def test_a_non_db_lag_reply_retries_once_without_maxlag_and_without_waiting(client):
+    waits = []
+    route = respx.get(URL).mock(
+        side_effect=[typed_lag_reply("queryservice"), httpx.Response(200, json={"ok": 1})]
+    )
+    body = api_get(client, URL, {"action": "query", "ids": "Q1"}, sleep=waits.append)
+    assert body == {"ok": 1}
+    assert waits == []
+    first, second = (c.request.url.params for c in route.calls)
+    assert first["maxlag"] == "5" and "maxlag" not in second
+    assert second["ids"] == "Q1" and second["format"] == "json"
+
+
+@respx.mock
+def test_the_unthrottled_retry_is_not_repeated_if_it_fails(client):
+    route = respx.get(URL).mock(
+        side_effect=[
+            typed_lag_reply("queryservice"),
+            httpx.Response(200, json={"error": {"code": "badvalue"}}),
+        ]
+    )
+    with pytest.raises(PipelineError) as raised:
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert "badvalue" in str(raised.value)
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_a_maxlag_error_on_the_unthrottled_retry_is_a_safe_stop_not_a_loop(client):
+    route = respx.get(URL).mock(side_effect=lambda request: typed_lag_reply("queryservice"))
+    with pytest.raises(PipelineError) as raised:
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert "lag" in str(raised.value)
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_the_unthrottled_retry_is_per_request_so_the_next_request_asks_politely_again(client):
+    route = respx.get(URL).mock(
+        side_effect=[
+            typed_lag_reply("queryservice"),
+            httpx.Response(200, json={"n": 1}),
+            httpx.Response(200, json={"n": 2}),
+        ]
+    )
+    api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert "maxlag" in route.calls.last.request.url.params
+
+
+@respx.mock
+def test_the_lag_line_shows_seconds_and_type_but_never_info_or_host_addresses(client, capsys):
+    respx.get(URL).mock(
+        side_effect=[typed_lag_reply("db", 8.25), httpx.Response(200, json={"ok": 1})]
+    )
+    api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    line = capsys.readouterr().out.strip()
+    assert "8.2 s lag" in line or "8.3 s lag" in line
+    assert "type db" in line
+    assert "secret" not in line and "10.0.0.1" not in line
+
+
+@respx.mock
+def test_the_non_db_line_names_the_type_and_the_unthrottled_retry(client, capsys):
+    respx.get(URL).mock(
+        side_effect=[typed_lag_reply("queryservice\nINJECT"), httpx.Response(200, json={"ok": 1})]
+    )
+    api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 1
+    assert "queryserviceinject" in out[0] and "without maxlag" in out[0]
