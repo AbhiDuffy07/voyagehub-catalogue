@@ -83,6 +83,7 @@ class PublishResult:
                 "published but not ready now",
                 f"photos {t['photos']}, summaries {t['summaries']}; left out for missing credit: "
                 f"{t['photos_left_out_no_credit']} photos, "
+                f"{t['photos_left_out_bad_author']} photos (author rule), "
                 f"{t['summaries_left_out_no_credit']} summaries",
             ]
         )
@@ -465,6 +466,7 @@ def run_publish_static(
         "photos": counts["photos"],
         "summaries": counts["summaries"],
         "photos_left_out_no_credit": counts["photos_left_out_no_credit"],
+        "photos_left_out_bad_author": counts["photos_left_out_bad_author"],
         "summaries_left_out_no_credit": counts["summaries_left_out_no_credit"],
         "largest_city_bytes": max(
             (len(d) for n, d in files.items() if n.startswith("cities/")), default=0

@@ -1,4 +1,5 @@
-"""Which photos may be a city's hero: the B6 checks plus a collage and author check.
+"""Which photos may be a city's hero (the B6 checks plus a collage and author check), and which
+credits any published photo may carry.
 
 B6 chose each photo for its own purpose (a 640 px gate, drop words, an override list). A hero is
 shown large at the top of a city, so it must also be hero size (B6 `hero_quality`), must not be a
@@ -78,13 +79,18 @@ def hero_problem(row: dict[str, Any], rules: HeroRules) -> str | None:
         return "override"
     if rules.name_pattern.search(name.rsplit(".", 1)[0]):
         return "name"
+    return "author" if author_problem(photo, rules) else None
+
+
+def author_problem(photo: dict[str, Any], rules: HeroRules) -> bool:
+    """True when a photo's credit may not be published: no author name, a credit line that points
+    elsewhere or is a pasted caption, an e-mail address (never published) or a very long author.
+    Applies to every published photo, not only heroes."""
     author = (photo.get("author") or "").strip()
     credit_text = f"{author} {photo.get('attribution') or ''}"  # both are published
-    if (
+    return (
         not author
         or len(author) > rules.max_author_chars
-        or rules.bad_author.search(credit_text)
-        or EMAIL.search(credit_text)
-    ):
-        return "author"
-    return None
+        or bool(rules.bad_author.search(credit_text))
+        or bool(EMAIL.search(credit_text))
+    )

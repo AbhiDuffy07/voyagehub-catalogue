@@ -430,3 +430,78 @@ def test_the_fallback_hero_is_the_best_scoring_credited_hero_quality_photo():
     assert up.counts["photos_left_out_no_credit"] == 0  # looking for a hero never counts photos
     up.place_listings[7] = [place(3, "Plain"), place(4, "Unlicensed")]
     assert b.fallback_hero(7, up) is None  # nothing hero-quality with a credit: stays empty
+
+
+BAD_AUTHORS = [
+    "see above",
+    "Unknown author",
+    "John Smith ( talk )",
+    "someone@example.org",
+    "myself",
+    "A" * 101,
+    "",
+]
+
+
+def _up_with_photo(**changes):
+    from catalogue.publish import build as b
+
+    photo = {**publishfixture.CREDIT_PHOTO, **changes}
+    return b.Upstream(
+        place_listings={},
+        photos={("listing", 7, 1): {"hero_quality": False, "photo": photo}},
+        summaries={},
+        timezones={},
+        blocks={},
+        stops={},
+        block_costs={},
+        days={},
+        bands={},
+    )
+
+
+def _listing():
+    return {"page_id": 7, "ordinal": 1, "name": "Fort", "listing_key": "see:1", "kind": "see"}
+
+
+@pytest.mark.parametrize("author", BAD_AUTHORS)
+def test_a_place_photo_that_fails_the_author_rule_is_left_out_and_counted(author):
+    from catalogue.publish import build as b
+
+    up = _up_with_photo(author=author, attribution=f"{author}, CC BY-SA 4.0")
+
+    assert b._place(_listing(), up, is_stop=False) is None  # not photographed: not a place
+    assert up.counts["photos_left_out_bad_author"] == 1
+    assert up.counts["photos_left_out_no_credit"] == 0
+
+
+@pytest.mark.parametrize("author", BAD_AUTHORS)
+def test_a_stop_keeps_its_place_but_not_a_photo_that_fails_the_author_rule(author):
+    from catalogue.publish import build as b
+
+    up = _up_with_photo(author=author, attribution=f"{author}, CC BY-SA 4.0")
+    place = b._place(_listing(), up, is_stop=True)
+
+    assert place is not None and place["photo"] is None
+    assert up.counts["photos_left_out_bad_author"] == 1
+
+
+def test_a_place_photo_with_a_real_author_is_kept():
+    from catalogue.publish import build as b
+
+    up = _up_with_photo()
+
+    assert b._place(_listing(), up, is_stop=False)["photo"]["credit"]["author"] == "Gerd Eichmann"
+    assert up.counts["photos_left_out_bad_author"] == 0
+
+
+def test_an_author_that_says_myself_may_not_be_a_hero():
+    from catalogue.publish import hero
+
+    rules = hero.load_hero_rules()
+    row = {
+        "hero_quality": True,
+        "photo": {**publishfixture.CREDIT_PHOTO, "author": "myself", "attribution": "myself"},
+    }
+
+    assert hero.hero_problem(row, rules) == "author"
