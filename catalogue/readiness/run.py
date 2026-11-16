@@ -40,6 +40,7 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
+from catalogue.publish.hero import author_problem, load_hero_rules
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -339,6 +340,7 @@ def run_readiness(
     hero: Counter[int] = Counter()
     places: Counter[int] = Counter()
     unowned_photos = 0
+    author_rules = load_hero_rules()  # publish-static leaves out a place photo that fails them
     try:
         for r in _rows(photos_folder / PHOTOS_FILE):
             if not r.get("photo"):
@@ -350,6 +352,8 @@ def run_readiness(
                 if owner is None:
                     unowned_photos += 1  # a photo of a listing that is not a place
                     continue
+                if author_problem(r["photo"], author_rules):
+                    continue  # not published, so not a photographed place
                 places[owner] += 1
             hero[owner] += bool(r.get("hero_quality"))
     except (KeyError, TypeError):

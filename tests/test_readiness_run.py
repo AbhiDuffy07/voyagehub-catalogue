@@ -315,3 +315,13 @@ def test_a_previous_state_with_another_schema_version_is_refused(tmp_path):
     state_path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(PipelineError, match="state.json"):
         run(tmp_path, tag="2", previous_folder=first.output_dir)
+
+
+def test_a_place_photo_that_fails_the_author_rule_is_not_a_photographed_place(tmp_path):
+    # publish-static leaves such a photo out, so readiness must not count it either
+    result, _ = run(tmp_path, bad_author=((1, 1),))
+    jaipur = rows(result)[1]
+
+    assert jaipur["photographed_places"] == 2
+    assert "photographed_places" in jaipur["failed_rules"]
+    assert jaipur["tier"] != "plannable"

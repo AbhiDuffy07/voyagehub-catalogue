@@ -155,11 +155,10 @@ def _apply_fees(
                 ),
             )
         )
-    unmatched = sorted(
-        f"{k[0]}/{k[1]}"
-        for k in fees
-        if (k not in {(r.get("owner_slug"), r["listing_key"]) for r, _ in listed})
-    )
+    present = {(str(r.get("owner_slug")), r["listing_key"]) for r, _ in listed}
+    slugs = {slug for slug, _ in present}
+    # A fee for a city this run does not cover (a country-filtered run) is out of scope, not a typo.
+    unmatched = sorted(f"{k[0]}/{k[1]}" for k in fees if k[0] in slugs and k not in present)
     return out, used, unmatched
 
 

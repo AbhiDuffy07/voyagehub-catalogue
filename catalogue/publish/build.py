@@ -141,7 +141,7 @@ def _place(listing: dict[str, Any], up: Upstream, is_stop: bool) -> dict[str, An
     key = ("listing", listing["page_id"], listing["ordinal"])
     photo = photo_of(up.photos.get(key), up.counts, up.hero_rules)
     if photo is None and not is_stop:
-        return None  # a place is a photographed place (B12 counts the same) or a block stop
+        return None  # a photographed place, as readiness counts it, or a block stop
     point = _point(listing.get("lat"), listing.get("long"))
     return {
         "key": listing["listing_key"],

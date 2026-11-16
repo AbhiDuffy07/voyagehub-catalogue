@@ -140,3 +140,12 @@ def test_a_stale_fee_is_not_exact(priced_world, tmp_path):
     amer = {r["listing_key"]: r for r in read(result, "listing_prices.jsonl")}["see:amer-fort"]
 
     assert amer["status"] == "not_fresh"
+
+
+def test_a_fee_for_a_city_the_run_does_not_cover_is_not_reported_as_a_typo(priced_world, tmp_path):
+    elsewhere = GOOD.replace("jaipur,", "other-city,", 1)
+
+    result = run(priced_world, fees_path=write(tmp_path, elsewhere))
+
+    assert result.totals["official_fees_applied"] == 0
+    assert result.totals["official_fees_unmatched"] == 0

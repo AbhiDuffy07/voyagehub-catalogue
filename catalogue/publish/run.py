@@ -437,7 +437,7 @@ def run_publish_static(
     files["attributions.json"] = _dump(AttributionsFile, attributions, "attributions.json")
     if len(files) + 3 > limits.max_files:  # plus manifest.json, _headers and index.html
         raise PipelineError(
-            f"{len(files) + 2} files, over the {limits.max_files} files limit; "
+            f"{len(files) + 3} files, over the {limits.max_files} files limit; "
             "city files need bundling by country"
         )
 

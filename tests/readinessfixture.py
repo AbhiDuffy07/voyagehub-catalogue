@@ -15,7 +15,11 @@ from pathlib import Path
 from catalogue.readiness.run import run_readiness
 
 TODAY = date(2026, 11, 15)
-PHOTO = {"commons_file": "X.jpg"}
+PHOTO = {
+    "commons_file": "X.jpg",
+    "author": "Gerd Eichmann",
+    "attribution": "Gerd Eichmann, CC BY-SA 4.0",
+}
 
 
 def sha(path: Path) -> str:
@@ -57,12 +61,13 @@ def listing(pid, ordinal, owner, kind="see", duplicate_of=None):
     }
 
 
-def photo(subject, pid, ordinal=0, *, hero=False, has=True):
+def photo(subject, pid, ordinal=0, *, hero=False, has=True, bad_author=False):
+    credit = {**PHOTO, "author": "myself", "attribution": "myself"} if bad_author else PHOTO
     return {
         "subject": subject,
         "page_id": pid,
         "ordinal": ordinal,
-        "photo": PHOTO if has else None,
+        "photo": credit if has else None,
         "hero_quality": hero and has,
     }
 
@@ -77,7 +82,9 @@ def block(block_id, owner, slug, slot, basis="kind"):
     }
 
 
-def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2, tag=""):
+def build(
+    tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2, tag="", bad_author=()
+):
     root = tmp_path / f"world{tag}"
     discover = root / "discover"
     articles = [
@@ -107,7 +114,7 @@ def build(tmp_path: Path, *, summaries=(1, 2, 5), blocks_rules=2, checks_rules=2
 
     photos = [
         photo("article", 1, hero=True),
-        *(photo("listing", 1, i) for i in (1, 2, 3)),
+        *(photo("listing", 1, i, bad_author=(1, i) in bad_author) for i in (1, 2, 3)),
         photo("listing", 1, 4, has=False),
         photo("article", 2),
         *(photo("listing", 20, i, hero=(i == 1)) for i in (1, 2, 3, 4)),
@@ -198,7 +205,7 @@ def run(tmp_path, **overrides):
         **{
             k: overrides.pop(k)
             for k in list(overrides)
-            if k in ("summaries", "blocks_rules", "checks_rules")
+            if k in ("summaries", "blocks_rules", "checks_rules", "bad_author")
         },
     )
     kwargs.update(overrides)
