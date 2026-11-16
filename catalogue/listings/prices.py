@@ -273,6 +273,43 @@ def _plain(text: str) -> str:
     return mwparserfromhell.parse(text).strip_code(normalize=True, collapse=True).strip()
 
 
+_NUM = r"\d[\d,]*(?:\.\d+)?"
+_SYMBOL = r"[^\d\s/,.:;]{0,3}"
+_PAIR = rf"(?P<c1>{_SYMBOL})\s?(?P<a>{_NUM})\s?/\s?(?P<c2>{_SYMBOL})\s?(?P<b>{_NUM})(?![\d/.]|\s?/)"
+_GROUPS = r"(?P<x>[A-Za-z]+)\s?/\s?(?P<y>non-[A-Za-z]+|[A-Za-z]+)"
+_PAIR_THEN_GROUPS = re.compile(rf"{_PAIR}\s+for\s+{_GROUPS}", re.IGNORECASE)
+_GROUPS_THEN_PAIR = re.compile(rf"{_GROUPS}\s?:\s?{_PAIR}", re.IGNORECASE)
+_RESIDENT_WORDS = frozenset({"local", "locals", "resident", "residents", "citizen", "citizens"})
+
+
+def _slash_tiers(text: str, country: str | None, reference: Reference) -> str:
+    """`₹40/300 for Indians/foreigners` (or `Indians/foreigners: ₹40/300`) is two prices, the first
+    for the country's own residents and the second for foreigners. It is rewritten to the long
+    form so one reading serves both; any other slash pair (room types, adults/children) is left
+    as it is, because which amount goes with which group would be a guess."""
+    demonyms = reference.demonyms.get(country or "", frozenset())
+
+    def resident(word: str) -> bool:
+        lower = word.lower()
+        return lower in _RESIDENT_WORDS or lower in demonyms or lower.removesuffix("s") in demonyms
+
+    def foreigner(word: str) -> bool:
+        lower = word.lower()
+        if lower in ("foreigner", "foreigners", "foreign"):
+            return True
+        return lower.startswith("non-") and resident(lower.removeprefix("non-"))
+
+    def swap(match: re.Match[str]) -> str:
+        x, y = match["x"], match["y"]
+        mixed = match["c1"] and match["c2"] and match["c1"] != match["c2"]
+        if mixed or not (resident(x) and foreigner(y)):
+            return match[0]
+        symbol = match["c1"] or match["c2"]
+        return f"{symbol}{match['a']} for {x}, {symbol}{match['b']} for foreigners"
+
+    return _GROUPS_THEN_PAIR.sub(swap, _PAIR_THEN_GROUPS.sub(swap, text))
+
+
 def _mask(text: str) -> tuple[str, list[tuple[int, int, str]], set[str]]:
     """The text with dates, ages, times, measures, percentages and units blanked out (same length,
     so positions still match), the unit spans found, and which kinds of phrase were seen. Amounts
@@ -604,7 +641,7 @@ def _label_only(plain: str) -> PriceResult | None:
 
 
 def parse_price(raw: str, *, country_iso: str | None, reference: Reference) -> PriceResult:
-    text = _plain(raw)
+    text = _slash_tiers(_plain(raw), country_iso, reference)
     if not text:
         return PriceResult("empty", [], False, None)
     scan, units, kinds = _mask(text)
