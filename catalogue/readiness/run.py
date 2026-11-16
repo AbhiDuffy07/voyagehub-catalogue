@@ -369,7 +369,7 @@ def run_readiness(
             is_article = r["subject"] == "article"
             owner = r["page_id"] if is_article else place_owner.get((r["page_id"], r["ordinal"]))
             if owner is None:
-                unowned_photos += 1  # a photo of a listing that is not a place
+                unowned_photos += 1  # a photo of a listing that is not a place (or has no name)
                 continue
             published = photo_of(r, Counter(), photo_rules) is not None
             if not is_article:
