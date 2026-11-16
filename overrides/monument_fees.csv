@@ -1,0 +1,15 @@
+# Official entry fees, each read by hand on 2026-11-16 from the owner's own booking page (the
+# Government of Rajasthan Official Booking Portal, Dept of Archaeology and Museums). Adult GENERAL
+# ticket, Indian vs foreigner, in whole rupees. The pages carry no "last updated" date; date_read
+# is the day we read them. The COMPOSITE ticket (one price for several sites) is not used.
+# Never fill a row from memory. Skip a place when official sources disagree.
+# Left out on purpose (no clean official source read): Agra (the ASI page and the Agra Circle page
+# disagree on every figure, and the ASI Taj Mahal Indian line is missing), Fatehpur Sikri (same
+# conflict), Varanasi/Sarnath (the ASI Sarnath page does not say which monument its fees are for),
+# and Jaipur City Palace and Jaigarh (no official fee page found).
+owner_slug,listing_key,place,currency,resident_amount,foreigner_amount,source_url,date_read,note
+jaipur,see:amber-fort,Amber Fort,INR,100,500,https://obms-tourist.rajasthan.gov.in/place-details/Amber-Fort,2026-11-16,General ticket adult; the portal lists the same for the night ticket
+jaipur,see:hawa-mahal,Hawa Mahal,INR,50,200,https://obms-tourist.rajasthan.gov.in/place-details/Hawa-mahal,2026-11-16,General ticket adult
+jaipur,see:jantar-mantar,Jantar Mantar,INR,50,200,https://obms-tourist.rajasthan.gov.in/place-details/Jantar-Mantar,2026-11-16,General ticket adult
+jaipur,see:albert-hall-museum,Albert Hall Museum,INR,50,300,https://obms-tourist.rajasthan.gov.in/place-details/Government-Central-Museum-Albert-Hall-Jaipur,2026-11-16,General ticket adult
+jaipur,see:nahargarh-fort,Nahargarh Fort,INR,50,200,https://obms-tourist.rajasthan.gov.in/place-details/Nahagarh-Fort,2026-11-16,General ticket adult

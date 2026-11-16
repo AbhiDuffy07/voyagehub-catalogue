@@ -26,10 +26,14 @@ from catalogue.blocks.inputs import LISTINGS_FILE, _verify
 from catalogue.discover.output import write_manifest, write_text
 from catalogue.enrich.inputs import _rows
 from catalogue.errors import PipelineError
+from catalogue.listings.lastedit import LastEdit, age_class
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.reference import load_country_currency, load_reference
 from catalogue.listings.run import parse_dump_date
+from catalogue.prices import fees as fees_module
 from catalogue.prices.costs import CHECK_OFFICIAL, day_cost, estimate_block
+from catalogue.prices.fees import FILE_NAME as FEES_FILE
+from catalogue.prices.fees import OfficialFee, load_official_fees
 from catalogue.prices.pricing import (
     VISITOR_TIERS,
     ListingPrice,
@@ -101,7 +105,70 @@ def _completeness(group: dict[str, Any]) -> str:
     return "complete" if group["unknown_stops"] == 0 else "partial"
 
 
-def _listing_row(row: dict[str, Any], price: ListingPrice, rules: PriceRules) -> dict[str, Any]:
+OFFICIAL_LICENCE = "Public fee notice (a fact, not a creative work)"
+
+
+def _apply_fees(
+    listed: list[tuple[dict[str, Any], ListingPrice]],
+    fees: dict[tuple[str, str], OfficialFee],
+    exponents: dict[str, int],
+    dump_day: date,
+) -> tuple[
+    list[tuple[dict[str, Any], ListingPrice]], dict[tuple[int, int], OfficialFee], list[str]
+]:
+    """An official fee replaces the Wikivoyage price of its listing: exact when it was read within
+    two years of the dump, else older. Returns the new list, the fees used by listing, and the
+    fees whose listing was not found (a typo, or another country)."""
+    used: dict[tuple[int, int], OfficialFee] = {}
+    out = []
+    for row, price in listed:
+        fee = fees.get((str(row.get("owner_slug")), row["listing_key"]))
+        if fee is None:
+            out.append((row, price))
+            continue
+        exponent = exponents.get(fee.currency)
+        minor = {}
+        for tier, amount in (("resident", fee.resident), ("foreigner", fee.foreigner)):
+            scaled = Decimal(amount) * 10 ** (exponent or 0)
+            if exponent is None or scaled != scaled.to_integral_value():
+                raise PipelineError(f"{FEES_FILE}: an amount does not fit its currency's units")
+            minor[tier] = int(scaled)
+        age = age_class(
+            LastEdit("parsed", fee.date_read.isoformat(), "day", fee.date_read.year),
+            dump_date=dump_day,
+        )
+        fresh = age == "within"
+        tiers = {tier: (value, value) for tier, value in minor.items()}
+        used[(price.page_id, price.ordinal)] = fee
+        out.append(
+            (
+                row,
+                replace(
+                    price,
+                    status="exact" if fresh else "not_fresh",
+                    age=age,
+                    currency=fee.currency,
+                    tiers=tiers if fresh else {},
+                    band_values=dict(minor),
+                    lastedit_date=fee.date_read.isoformat(),
+                    price_text=f"official fee, read {fee.date_read.isoformat()}",
+                ),
+            )
+        )
+    unmatched = sorted(
+        f"{k[0]}/{k[1]}"
+        for k in fees
+        if (k not in {(r.get("owner_slug"), r["listing_key"]) for r, _ in listed})
+    )
+    return out, used, unmatched
+
+
+def _listing_row(
+    row: dict[str, Any],
+    price: ListingPrice,
+    rules: PriceRules,
+    fee: OfficialFee | None = None,
+) -> dict[str, Any]:
     out: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "listing_key": row["listing_key"],
@@ -123,6 +190,15 @@ def _listing_row(row: dict[str, Any], price: ListingPrice, rules: PriceRules) ->
         out["price_text"] = price.price_text
         for key in ("source_url", "revision_id", "licence", "licence_url", "attribution"):
             out[key] = row.get(key)
+        if fee is not None:
+            out.update(
+                fee_source="official",
+                source_url=fee.source_url,
+                revision_id=None,
+                licence=OFFICIAL_LICENCE,
+                licence_url=None,
+                attribution=f"Official fee page, read {fee.date_read.isoformat()}",
+            )
     return out
 
 
@@ -177,7 +253,13 @@ def _sample_text(
     return "\n".join(lines) + "\n"
 
 
-def _report(totals: dict[str, Any], dump_date: str, rules: PriceRules) -> str:
+def _report(
+    totals: dict[str, Any],
+    dump_date: str,
+    rules: PriceRules,
+    fees: list[OfficialFee],
+    unmatched: list[str],
+) -> str:
     t = totals
     lines = [
         f"# Prices and cost estimates, dump {dump_date}",
@@ -223,6 +305,16 @@ def _report(totals: dict[str, Any], dump_date: str, rules: PriceRules) -> str:
         f'unknown ("{CHECK_OFFICIAL}"): {t["stops_unknown"]} (foreigner view)',
         f"- days from checked blocks: {t['days']}; with a figure: {t['days_with_figure']}",
         "",
+        "## Official fees (overrides/monument_fees.csv)",
+        "",
+        f"- used: {t['official_fees_applied']}; not found in the listings: "
+        f"{t['official_fees_unmatched']}",
+        *[
+            f"- used: {_md(f.owner_slug)}/{_md(f.listing_key)}, read {f.date_read.isoformat()}"
+            for f in sorted(fees, key=lambda f: (f.owner_slug, f.listing_key))
+        ],
+        *[f"- NOT FOUND (check the key): {_md(key)}" for key in unmatched],
+        "",
     ]
     return "\n".join(lines)
 
@@ -237,6 +329,7 @@ def run_price_bands(
     today: date,
     country_iso: str | None = None,
     rules: PriceRules | None = None,
+    fees_path: Path | None = None,
 ) -> PriceResult:
     dump_day = parse_dump_date(dump_date)
     rules = rules if rules is not None else load_price_rules()
@@ -261,6 +354,11 @@ def run_price_bands(
     exps = reference.exponents
     currency_of = load_country_currency()
     listed = _read_listings(listings_folder, dump_day, rules)
+    fees_file = fees_path if fees_path is not None else fees_module.FEES_PATH
+    fees = load_official_fees(fees_file, today=today)
+    if fees_file.is_file():
+        hashes[FEES_FILE] = hashlib.sha256(fees_file.read_bytes()).hexdigest()
+    listed, used_fees, unmatched_fees = _apply_fees(listed, fees, exps, dump_day)
     city_currency: dict[int, str | None] = {}
     city_title: dict[int, str] = {}
     for row, price in listed:
@@ -304,7 +402,9 @@ def run_price_bands(
         for row, price in sorted(listed, key=lambda x: (x[1].page_id, x[1].ordinal)):
             counts[price.status] += 1
             if price.status != "none":
-                out.write(_listing_row(row, price, rules))
+                out.write(
+                    _listing_row(row, price, rules, used_fees.get((price.page_id, price.ordinal)))
+                )
     with JsonlWriter(target / "city_price_bands.jsonl") as out:
         for key in sorted(bands):
             out.write(
@@ -404,6 +504,8 @@ def run_price_bands(
         "stops_unknown": stop_counts["unknown"],
         "days": day_total,
         "days_with_figure": days_with_figure,
+        "official_fees_applied": len(used_fees),
+        "official_fees_unmatched": len(unmatched_fees),
     }
 
     rng = random.Random(11)  # noqa: S311 - a reproducible sample, not security
@@ -423,7 +525,10 @@ def run_price_bands(
     write_text(
         target / "cost_sample.md", _sample_text(sample, stops_by_block, listing_by_key, exps)
     )
-    write_text(target / "report.md", _report(totals, dump_date, rules))
+    write_text(
+        target / "report.md",
+        _report(totals, dump_date, rules, list(used_fees.values()), unmatched_fees),
+    )
     write_manifest(
         target / "manifest.json",
         {
