@@ -371,3 +371,27 @@ def test_a_place_photo_without_a_licence_or_https_link_is_no_photographed_place(
     )
 
     assert rows(result)[1]["photographed_places"] == 1
+
+
+def test_a_photo_of_an_unnamed_listing_is_no_photographed_place(tmp_path):
+    # publish-static leaves a listing without a name out, with its photo
+    result, _ = run(tmp_path, unnamed=((1, 1),))
+
+    assert rows(result)[1]["photographed_places"] == 2
+
+
+def test_a_place_photo_with_a_non_web_licence_link_is_no_photographed_place(tmp_path):
+    result, _ = run(tmp_path, photo_edits={(1, 1): {"licence_url": "ftp://x/y"}})
+
+    assert rows(result)[1]["photographed_places"] == 2
+
+
+def test_the_manifest_records_the_rule_files_that_decide_which_photos_count(tmp_path):
+    result, _ = run(tmp_path)
+    manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    assert set(manifest["rules_sha256"]) == {
+        "rejected_heroes.csv",
+        "rejected_photos.csv",
+        "publish_content.toml",
+    }

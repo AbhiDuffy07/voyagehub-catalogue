@@ -40,8 +40,15 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
+from catalogue.photos.select import REJECTED_PATH
 from catalogue.publish.build import photo_of
-from catalogue.publish.hero import HeroRules, hero_problem, load_hero_rules
+from catalogue.publish.hero import (
+    CONTENT_PATH,
+    HEROES_PATH,
+    HeroRules,
+    hero_problem,
+    load_hero_rules,
+)
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -245,6 +252,13 @@ def _report(totals: dict[str, Any], dump_date: str, rules: ReadinessRules) -> st
     return "\n".join(lines)
 
 
+def _rule_file_hashes() -> dict[str, str]:
+    """Hashes of the rule and override files that decide which photos count (they change the
+    result without being run inputs), so two runs that differ only there can be told apart."""
+    paths = (HEROES_PATH, REJECTED_PATH, CONTENT_PATH)
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths if p.is_file()}
+
+
 def run_readiness(
     *,
     listings_folder: Path,
@@ -324,7 +338,9 @@ def run_readiness(
         place_owner = {
             (r["page_id"], r["ordinal"]): r["owner_page_id"]
             for r in _rows(listings_folder / LISTINGS_FILE)
-            if r["kind"] in rules.place_sections and not r["duplicate_of"]
+            if r["kind"] in rules.place_sections
+            and not r["duplicate_of"]
+            and (r.get("name") or "").strip()  # publish-static leaves an unnamed listing out
         }
         has_summary = {
             r["page_id"]
@@ -350,14 +366,13 @@ def run_readiness(
         for r in _rows(photos_folder / PHOTOS_FILE):
             if not r.get("photo"):
                 continue
+            is_article = r["subject"] == "article"
+            owner = r["page_id"] if is_article else place_owner.get((r["page_id"], r["ordinal"]))
+            if owner is None:
+                unowned_photos += 1  # a photo of a listing that is not a place
+                continue
             published = photo_of(r, Counter(), photo_rules) is not None
-            if r["subject"] == "article":
-                owner = r["page_id"]
-            else:
-                owner = place_owner.get((r["page_id"], r["ordinal"]))
-                if owner is None:
-                    unowned_photos += 1  # a photo of a listing that is not a place
-                    continue
+            if not is_article:
                 if not published:
                     continue  # publish-static leaves it out, so it is no photographed place
                 places[owner] += 1
@@ -521,6 +536,7 @@ def run_readiness(
             "country_filter": country_filter,
             "generated_on": today.isoformat(),
             "inputs_sha256": hashes,
+            "rules_sha256": _rule_file_hashes(),
             "totals": totals,
             "outputs_sha256": {
                 name: hashlib.sha256((target / name).read_bytes()).hexdigest()

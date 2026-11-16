@@ -54,8 +54,9 @@ def article(pid, title, kind="city", status="usable", country="IN"):
     }
 
 
-def listing(pid, ordinal, owner, kind="see", duplicate_of=None):
+def listing(pid, ordinal, owner, kind="see", duplicate_of=None, name=None):
     return {
+        "name": f"Place {pid}-{ordinal}" if name is None else name,
         "page_id": pid,
         "ordinal": ordinal,
         "owner_page_id": owner,
@@ -95,6 +96,7 @@ def build(
     tag="",
     bad_author=(),
     photo_edits=None,
+    unnamed=(),
 ):
     edits = photo_edits or {}  # {(page_id, ordinal): changes to that photo}
     root = tmp_path / f"world{tag}"
@@ -110,7 +112,7 @@ def build(
     articles_hash = jsonl(discover / "articles.jsonl", articles)
 
     listings = [
-        *(listing(1, i, 1) for i in (1, 2, 3, 4)),
+        *(listing(1, i, 1, name="  " if (1, i) in unnamed else None) for i in (1, 2, 3, 4)),
         *(listing(20, i, 2) for i in (1, 2, 3)),  # a district's listings belong to Agra
         listing(20, 4, 2, duplicate_of="see:x"),  # a duplicate is never a place
         *(listing(3, i, 3) for i in (1, 2, 3)),
@@ -220,7 +222,8 @@ def run(tmp_path, **overrides):
         **{
             k: overrides.pop(k)
             for k in list(overrides)
-            if k in ("summaries", "blocks_rules", "checks_rules", "bad_author", "photo_edits")
+            if k
+            in ("summaries", "blocks_rules", "checks_rules", "bad_author", "photo_edits", "unnamed")
         },
     )
     kwargs.update(overrides)
