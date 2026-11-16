@@ -19,7 +19,9 @@ from pathlib import Path
 _PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}(\s+#.*)?$")
 _USES = re.compile(r"^\s*-?\s*uses:\s*(\S.*)$")
 _TOP_LEVEL_PERMISSIONS = re.compile(r"^permissions:")
-_PULL_REQUEST_TRIGGER = re.compile(r"^\s*pull_request\s*:")
+# A word boundary does not match pull_request_target (which is banned separately).
+_PULL_REQUEST_TRIGGER = re.compile(r"\bpull_request\b")
+_SECRETS = re.compile(r"\bsecrets\b")
 _TIMEOUT = re.compile(r"^\s*timeout-minutes:\s*\d+")
 _FLOATING_RUNNER = re.compile(r"^\s*runs-on:\s*\S*-latest")
 
@@ -40,12 +42,12 @@ def problems(name: str, text: str) -> list[str]:
         found.append(f"{name}: set `timeout-minutes` on every job")
 
     runs_on_pull_requests = name == "ci.yml" or any(
-        _PULL_REQUEST_TRIGGER.match(line) for _, line in lines
+        _PULL_REQUEST_TRIGGER.search(line) for _, line in lines
     )
     for number, line in lines:
         if "pull_request_target" in line:
             found.append(f"{name}:{number}: pull_request_target is not allowed in this public repo")
-        if runs_on_pull_requests and "secrets." in line:
+        if runs_on_pull_requests and _SECRETS.search(line):
             found.append(
                 f"{name}:{number}: a workflow that runs on pull requests must not use secrets"
             )

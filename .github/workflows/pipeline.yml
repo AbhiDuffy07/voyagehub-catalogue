@@ -103,17 +103,19 @@ jobs:
           python -m catalogue auto-check --dump-date "$DUMP_DATE" --country "$COUNTRY"
           python -m catalogue price-bands --dump-date "$DUMP_DATE" --country "$COUNTRY"
 
-      # The state file lives in the `readiness-state` artifact of the latest deployed run. Without
+      # The state file lives in the `readiness-state-<CC>` artifact of the latest production run. Without
       # one (first run, or older than the 90-day retention) every city counts as a first failure,
-      # which never unpublishes anything: the safe direction.
+      # which never unpublishes anything: the safe direction. The artifact is per country, and only
+      # production deploys save one, so a preview can never become the "previous" state.
       - name: Fetch the previous readiness state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p previous-state
-          for run_id in $(gh run list --workflow pipeline.yml --status success --limit 20 \
-              --json databaseId --jq '.[].databaseId'); do
-            if gh run download "$run_id" --name readiness-state --dir previous-state 2> /dev/null; then
+          # A failing listing stops the step (it must not look like a first run).
+          run_ids=$(gh run list --workflow pipeline.yml --status success --limit 20             --json databaseId --jq '.[].databaseId')
+          for run_id in $run_ids; do
+            if gh run download "$run_id" --name "readiness-state-$COUNTRY" --dir previous-state                 2> /dev/null; then
               echo "previous readiness state: found"
               exit 0
             fi
@@ -137,12 +139,12 @@ jobs:
           --site-dir "out/publish/${DUMP_DATE}-${COUNTRY}/site"
           --branch "$PAGES_BRANCH" --yes
 
-      # Only after a successful deploy, so the saved state always matches what is live.
+      # Only after a successful production deploy, so the saved state matches what is live.
       - name: Save the readiness state
-        if: inputs.deploy
+        if: inputs.deploy && inputs.pages_branch == 'main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: readiness-state
+          name: readiness-state-${{ inputs.country }}
           path: out/readiness/${{ inputs.dump_date }}-${{ inputs.country }}/state.json
           retention-days: 90
           if-no-files-found: error

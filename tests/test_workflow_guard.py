@@ -105,3 +105,18 @@ def test_the_workflows_in_this_repo_pass_the_guard():
     root = Path(__file__).resolve().parent.parent
 
     assert check_directory(root / ".github" / "workflows") == []
+
+
+def test_inline_pull_request_triggers_are_detected():
+    for trigger in ("on: [push, pull_request]", "on: pull_request"):
+        text = CLEAN.replace("on:\n  pull_request:", trigger)
+        text += "      - run: echo ${{ secrets.X }}\n"
+
+        assert any("secrets" in problem for problem in problems("other.yml", text)), trigger
+
+
+def test_other_ways_of_reaching_secrets_are_detected():
+    for expression in ("${{ secrets['X'] }}", "${{ toJSON(secrets) }}"):
+        text = CLEAN + f"      - run: echo {expression}\n"
+
+        assert any("secrets" in problem for problem in problems("other.yml", text)), expression

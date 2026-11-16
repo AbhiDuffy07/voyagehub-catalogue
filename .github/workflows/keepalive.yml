@@ -32,6 +32,6 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --max-time 30 --retry 3 --retry-delay 10 --retry-all-errors \
             --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
-            "$SUPABASE_URL/rest/v1/countries?select=code&limit=1" 2> /dev/null) || status="failed"
+            "${SUPABASE_URL%/}/rest/v1/countries?select=code&limit=1" 2> /dev/null) || status="failed"
           echo "supabase read: HTTP $status"
           case "$status" in 200|206) ;; *) exit 1 ;; esac
