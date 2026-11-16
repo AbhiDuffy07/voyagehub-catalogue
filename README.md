@@ -212,7 +212,28 @@ Offline and fast (seconds): no network, no settings. It reads, each hash-checked
 - **Schemas:** the files are validated with pydantic models before anything is written; the JSON Schemas are in `schemas/` (`python -m catalogue.publish.schemas` rewrites them, a test fails if they drift).
 - **Checks on the inputs:** every folder is hash-checked, and readiness, auto-check and price-bands must have been built from exactly the files read here.
 - **Limits** (`config/publish_limits.toml`; Cloudflare Pages Free allows 20,000 files and 25 MiB per file): at most 18,000 files, 1 MiB per city file, 2 MiB for `index.json`, 20 MiB for any other file. The build stops with a clear message instead of uploading. A world run will need the index and the cities sharded by country if it passes these.
-- **Deploy:** `deploy` runs `npx --yes wrangler@4.156.0 pages deploy` (exact pin, no shell) only with `--yes` and only if the site folder is exactly what `publish-static` built. Sign in once with `npx wrangler@4.156.0 login` (browser); no token is read or stored. The GitHub Actions token is B14.
+- **Deploy:** `deploy` runs `npx --yes wrangler@4.156.0 pages deploy` (exact pin, no shell) only with `--yes` and only if the site folder is exactly what `publish-static` built. Sign in once with `npx wrangler@4.156.0 login` (browser); no token is read or stored here. GitHub Actions is below.
+
+## Running it in GitHub Actions
+
+Two workflows (B14). Neither runs on pull requests, and `ci.yml` still uses no secrets.
+
+- **`pipeline`** (manual only: Actions tab > pipeline > Run workflow, from `main`). Inputs: `dump_date` (a dump still online at dumps.wikimedia.org), `country` (default IN), `deploy` (default off: builds only, so a trial cannot publish) and `pages_branch` (`main` = production, any other name = preview). It runs discover, fetch-listings, enrich-wikidata, wikipedia-summary, photo-candidates, photo-select, derive-timezone, draft-blocks, auto-check, price-bands, readiness and publish-static, then `deploy --yes` if asked. It stops if discover changes `data/slugs.json` (slugs come only from a reviewed PR). There is no schedule and no failure mail for it.
+- **Time:** estimated from earlier local runs at about 1.5-2 hours for India, worst case about 3, against the 6-hour job limit (set to 5 h 45 min), so it fits in one job. This is not yet measured in Actions; the weakest guesses are enrich-wikidata and photo-candidates. A world run is untested; if it ever passes the limit, split into a collect job and a build+deploy job passing `out/` as an artifact.
+- **Readiness state:** `state.json` is saved as the `readiness-state-<CC>` artifact (90 days) only after a successful production deploy (`pages_branch` = `main`), so a preview or another country never replaces it. The next run takes the newest one for its country from an earlier successful run. If none is found (first run, or expired) the run starts without one: every city counts as a first failure, so nothing is unpublished. A damaged state file stops the run.
+- **`keepalive`** (daily at 17:23 UTC, also manual): reads one row of `public.countries` through the public API so the Supabase Free project is not paused for low activity (Supabase pauses after 7 days of low database activity). GitHub turns scheduled workflows off after 60 days without repository activity; re-enable it in the Actions tab if that happens.
+
+One-time check: the `production` environment must be limited to the `main` branch (Settings > Environments > production > Deployment branches), otherwise a workflow edited on another branch could read its secrets.
+
+Secrets (the owner adds them; the workflows never print them):
+
+| Secret | Where | Used by |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN` | environment `production` (main branch only) | pipeline deploy; token with only Account > Cloudflare Pages > Edit |
+| `CLOUDFLARE_ACCOUNT_ID` | environment `production` | pipeline deploy |
+| `CONTACT_EMAIL` | environment `production` | pipeline (Wikimedia User-Agent); the project email |
+| `SUPABASE_URL` | repository secret | keepalive |
+| `SUPABASE_PUBLISHABLE_KEY` | repository secret | keepalive; the publishable key only, never a secret key or a database URL |
 
 ## Known follow-ups
 

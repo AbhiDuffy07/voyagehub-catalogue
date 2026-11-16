@@ -1,0 +1,37 @@
+name: keepalive
+
+# Supabase Free pauses a project after 7 days of low database activity. One small read a day
+# through the public API keeps it awake: the request reaches Postgres (public.countries is
+# readable by the anon role; an empty answer is fine). It uses only the project URL and the
+# publishable key, never a database URL or a service key. Nothing is printed except the status code.
+#
+# GitHub switches off scheduled workflows in a public repo after 60 days without repository
+# activity; if that happens, re-enable the workflow in the Actions tab.
+on:
+  schedule:
+    - cron: "23 17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read one row through the public API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must both be set as repository secrets"
+            exit 1
+          fi
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --max-time 30 --retry 3 --retry-delay 10 --retry-all-errors \
+            --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            "${SUPABASE_URL%/}/rest/v1/countries?select=code&limit=1" 2> /dev/null) || status="failed"
+          echo "supabase read: HTTP $status"
+          case "$status" in 200|206) ;; *) exit 1 ;; esac

@@ -11,6 +11,7 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@{SHA} # v7.0.1
       - run: echo hello
@@ -58,10 +59,29 @@ def test_the_ci_workflow_must_not_use_secrets():
     assert any("secrets" in problem for problem in problems("ci.yml", text))
 
 
-def test_other_workflows_may_use_secrets():
+def test_a_manual_workflow_may_use_secrets():
+    text = CLEAN.replace("  pull_request:", "  workflow_dispatch:")
+    text += "      - run: echo ${{ secrets.DATABASE_URL }}\n"
+
+    assert problems("pipeline.yml", text) == []
+
+
+def test_any_workflow_that_runs_on_pull_requests_must_not_use_secrets():
     text = CLEAN + "      - run: echo ${{ secrets.DATABASE_URL }}\n"
 
-    assert problems("catalogue-weekly.yml", text) == []
+    assert any("secrets" in problem for problem in problems("other.yml", text))
+
+
+def test_secrets_in_a_comment_are_ignored():
+    text = CLEAN + "      # uses secrets.X in a later PR\n"
+
+    assert problems("other.yml", text) == []
+
+
+def test_a_workflow_without_a_job_timeout_is_flagged():
+    text = CLEAN.replace("    timeout-minutes: 10\n", "")
+
+    assert any("timeout-minutes" in problem for problem in problems("ci.yml", text))
 
 
 def test_a_workflow_without_top_level_permissions_is_flagged():
@@ -85,3 +105,18 @@ def test_the_workflows_in_this_repo_pass_the_guard():
     root = Path(__file__).resolve().parent.parent
 
     assert check_directory(root / ".github" / "workflows") == []
+
+
+def test_inline_pull_request_triggers_are_detected():
+    for trigger in ("on: [push, pull_request]", "on: pull_request"):
+        text = CLEAN.replace("on:\n  pull_request:", trigger)
+        text += "      - run: echo ${{ secrets.X }}\n"
+
+        assert any("secrets" in problem for problem in problems("other.yml", text)), trigger
+
+
+def test_other_ways_of_reaching_secrets_are_detected():
+    for expression in ("${{ secrets['X'] }}", "${{ toJSON(secrets) }}"):
+        text = CLEAN + f"      - run: echo {expression}\n"
+
+        assert any("secrets" in problem for problem in problems("other.yml", text)), expression

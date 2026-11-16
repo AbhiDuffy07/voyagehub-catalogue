@@ -2,7 +2,9 @@
 
 Rules (see the repo's security settings):
 - no `pull_request_target` (it runs with secrets on code from forks);
-- ci.yml, which runs on pull requests, must not reference secrets;
+- a workflow that runs on pull requests (ci.yml always, any other if it has a `pull_request`
+  trigger) must not reference secrets;
+- every workflow sets `timeout-minutes` (a stuck job must not run for the 6-hour default);
 - every `uses:` is pinned to a full 40-character commit SHA (a tag can be moved);
 - every workflow sets a top-level `permissions:` block;
 - `runs-on` names a fixed runner image, never a floating `*-latest` one.
@@ -17,6 +19,10 @@ from pathlib import Path
 _PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}(\s+#.*)?$")
 _USES = re.compile(r"^\s*-?\s*uses:\s*(\S.*)$")
 _TOP_LEVEL_PERMISSIONS = re.compile(r"^permissions:")
+# A word boundary does not match pull_request_target (which is banned separately).
+_PULL_REQUEST_TRIGGER = re.compile(r"\bpull_request\b")
+_SECRETS = re.compile(r"\bsecrets\b")
+_TIMEOUT = re.compile(r"^\s*timeout-minutes:\s*\d+")
 _FLOATING_RUNNER = re.compile(r"^\s*runs-on:\s*\S*-latest")
 
 
@@ -32,11 +38,19 @@ def problems(name: str, text: str) -> list[str]:
     if not any(_TOP_LEVEL_PERMISSIONS.match(line) for _, line in lines):
         found.append(f"{name}: add a top-level `permissions:` block (read-only by default)")
 
+    if not any(_TIMEOUT.match(line) for _, line in lines):
+        found.append(f"{name}: set `timeout-minutes` on every job")
+
+    runs_on_pull_requests = name == "ci.yml" or any(
+        _PULL_REQUEST_TRIGGER.search(line) for _, line in lines
+    )
     for number, line in lines:
         if "pull_request_target" in line:
             found.append(f"{name}:{number}: pull_request_target is not allowed in this public repo")
-        if name == "ci.yml" and "secrets." in line:
-            found.append(f"{name}:{number}: ci.yml runs on pull requests and must not use secrets")
+        if runs_on_pull_requests and _SECRETS.search(line):
+            found.append(
+                f"{name}:{number}: a workflow that runs on pull requests must not use secrets"
+            )
         if _FLOATING_RUNNER.match(line):
             found.append(f"{name}:{number}: pin the runner image (for example ubuntu-24.04)")
         uses = _USES.match(line)

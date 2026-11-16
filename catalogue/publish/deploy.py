@@ -1,7 +1,8 @@
 """`deploy` (B13): upload a built site to Cloudflare Pages with a pinned wrangler.
 
-Local use only: sign in once with `npx wrangler@<version> login` (browser). No token is read or
-written here; the GitHub Actions token arrives in B14. The deploy refuses to run unless the site
+Locally, sign in once with `npx wrangler@<version> login` (browser). In GitHub Actions (B14)
+wrangler reads CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from the environment. No token is
+read, written or printed by this code. The deploy refuses to run unless the site
 folder is exactly what `publish-static` built (every file matches `v1/manifest.json`, none extra)
 and the owner passed --yes. Error messages name files only (the logs are public).
 """
