@@ -273,11 +273,11 @@ def _plain(text: str) -> str:
     return mwparserfromhell.parse(text).strip_code(normalize=True, collapse=True).strip()
 
 
-_NUM = r"\d[\d,]*(?:\.\d+)?"
+_NUM = r"\d(?:[\d,]*\d)?(?:\.\d+)?"
 _SYMBOL = r"[^\d\s/,.:;]{0,3}"
 _PAIR = rf"(?P<c1>{_SYMBOL})\s?(?P<a>{_NUM})\s?/\s?(?P<c2>{_SYMBOL})\s?(?P<b>{_NUM})(?![\d/.]|\s?/)"
 _GROUPS = r"(?P<x>[A-Za-z]+)\s?/\s?(?P<y>non-[A-Za-z]+|[A-Za-z]+)"
-_PAIR_THEN_GROUPS = re.compile(rf"{_PAIR}\s+for\s+{_GROUPS}", re.IGNORECASE)
+_PAIR_THEN_GROUPS = re.compile(rf"{_PAIR}(?:\s+for\s+|,?\s+|\s?\(){_GROUPS}\)?", re.IGNORECASE)
 _GROUPS_THEN_PAIR = re.compile(rf"{_GROUPS}\s?:\s?{_PAIR}", re.IGNORECASE)
 _RESIDENT_WORDS = frozenset({"local", "locals", "resident", "residents", "citizen", "citizens"})
 

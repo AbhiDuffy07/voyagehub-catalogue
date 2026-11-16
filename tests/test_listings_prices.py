@@ -540,6 +540,9 @@ def _tiers(result):
         "₹50/₹200 for Indians/foreigners",
         "₹ 50/200 for Indian/foreigner",
         "Indian/foreigner: ₹50/200",
+        "₹ 50/200 Indians/foreigners",
+        "₹ 50/200, Indians/foreigners",
+        "₹50/200 (Indian/foreigners)",
     ],
 )
 def test_a_slash_pair_for_residents_and_foreigners_is_two_tiers(raw):
