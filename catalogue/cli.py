@@ -23,6 +23,7 @@ from catalogue.blocks.run import run_draft_blocks
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import dump_filename, fetch_dump
 from catalogue.discover.overrides import load_country_iso_overrides
+from catalogue.discover.propose import run_propose_slugs
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.enrich.run import run_enrich_wikidata
@@ -77,6 +78,22 @@ def _parser() -> argparse.ArgumentParser:
         "--init-registry",
         action="store_true",
         help="allow a missing slug registry (a genuine first run only)",
+    )
+
+    propose = commands.add_parser(
+        "propose-slugs",
+        help="give a slug to every city article that has none and add it to data/slugs.json "
+        "(offline; existing slugs never change; commit the result in a reviewed pull request)",
+    )
+    propose.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    propose.add_argument(
+        "--discover-dir", type=Path, default=Path("out/discover"), help="where discover wrote"
+    )
+    propose.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="folder with the committed slug registry, slugs.json",
     )
 
     fetch = commands.add_parser(
@@ -384,6 +401,15 @@ def _discover(
     print(f"files: {result.output_dir}")
 
 
+def _propose_slugs(args: argparse.Namespace) -> None:
+    result = run_propose_slugs(
+        articles_path=args.discover_dir / args.dump_date / "articles.jsonl",
+        registry_path=args.data_dir / "slugs.json",
+    )
+    print(result.summary())
+    print(f"files: {result.report_path}")
+
+
 def _fetch_listings(args: argparse.Namespace) -> None:
     registry_path = args.data_dir / "slugs.json"
     if not registry_path.is_file():
@@ -659,6 +685,8 @@ def main(
     try:
         if args.command == "discover":
             _discover(args, environ, env_file, client_factory)
+        elif args.command == "propose-slugs":
+            _propose_slugs(args)
         elif args.command == "report":
             _report(args)
         elif args.command == "fetch-listings":
