@@ -7,6 +7,7 @@ ready); 4 Goa is a region (not assessed); 5 Kochi has one place photo and one on
 no time zone, no block (not ready).
 """
 
+import functools
 import hashlib
 import json
 from datetime import date
@@ -97,7 +98,11 @@ def build(
     bad_author=(),
     photo_edits=None,
     unnamed=(),
+    countries=None,
+    world=False,
 ):
+    file_country = None if world else "IN"
+    man = functools.partial(manifest, country=file_country)
     edits = photo_edits or {}  # {(page_id, ordinal): changes to that photo}
     root = tmp_path / f"world{tag}"
     discover = root / "discover"
@@ -109,6 +114,8 @@ def build(
         article(5, "Kochi"),
         article(20, "Agra Fort District", kind="district"),
     ]
+    for a in articles:
+        a["tree_country_iso"] = (countries or {}).get(a["wikivoyage_page_id"], "IN")
     articles_hash = jsonl(discover / "articles.jsonl", articles)
 
     listings = [
@@ -120,7 +127,7 @@ def build(
         *(listing(5, i, 5) for i in (2,)),
     ]
     lis = root / "listings"
-    manifest(
+    man(
         lis,
         {"listings.jsonl": jsonl(lis / "listings.jsonl", listings)},
         articles_sha256=articles_hash,
@@ -140,7 +147,7 @@ def build(
         photo("listing", 5, 2, hero=True),
     ]
     pho = root / "photos"
-    manifest(pho, {"photo_selection.jsonl": jsonl(pho / "photo_selection.jsonl", photos)})
+    man(pho, {"photo_selection.jsonl": jsonl(pho / "photo_selection.jsonl", photos)})
 
     sums = [
         {"subject": "article", "page_id": pid, "ordinal": 0, "summary": "Text."}
@@ -148,13 +155,13 @@ def build(
     ]
     sums += [{"subject": "article", "page_id": 3, "ordinal": 0, "summary": ""}]
     sumf = root / "summaries"
-    manifest(sumf, {"summaries.jsonl": jsonl(sumf / "summaries.jsonl", sums)})
+    man(sumf, {"summaries.jsonl": jsonl(sumf / "summaries.jsonl", sums)})
 
     zones = [{"wikivoyage_page_id": pid, "timezone": "Asia/Kolkata"} for pid in (1, 2, 3)] + [
         {"wikivoyage_page_id": 5, "timezone": None}
     ]
     tzf = root / "timezones"
-    manifest(
+    man(
         tzf,
         {"destination_timezones.jsonl": jsonl(tzf / "destination_timezones.jsonl", zones)},
         country=None,
@@ -167,7 +174,7 @@ def build(
         block("varanasi-pm", 3, "3", "afternoon"),
     ]
     blk = root / "blocks"
-    manifest(
+    man(
         blk,
         {"day_blocks.jsonl": jsonl(blk / "day_blocks.jsonl", blocks)},
         rules_version=blocks_rules,
@@ -179,7 +186,7 @@ def build(
         {"block_id": "varanasi-pm", "check_status": "rejected"},
     ]
     chk = root / "checks"
-    manifest(
+    man(
         chk,
         {"block_checks.jsonl": jsonl(chk / "block_checks.jsonl", checks)},
         blocks_rules_version=checks_rules,
@@ -210,7 +217,7 @@ def build(
         "out_dir": tmp_path / f"out{tag}",
         "dump_date": "20261101",
         "today": TODAY,
-        "country_iso": "IN",
+        "country_iso": file_country,
     }
 
 
@@ -223,7 +230,16 @@ def run(tmp_path, **overrides):
             k: overrides.pop(k)
             for k in list(overrides)
             if k
-            in ("summaries", "blocks_rules", "checks_rules", "bad_author", "photo_edits", "unnamed")
+            in (
+                "summaries",
+                "blocks_rules",
+                "checks_rules",
+                "bad_author",
+                "photo_edits",
+                "unnamed",
+                "countries",
+                "world",
+            )
         },
     )
     kwargs.update(overrides)
