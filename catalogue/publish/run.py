@@ -19,8 +19,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
-
 from catalogue.blocks.inputs import (
     LISTINGS_FILE,
     PHOTOS_FILE,
@@ -31,13 +29,14 @@ from catalogue.enrich.inputs import _rows
 from catalogue.errors import PipelineError
 from catalogue.listings.run import parse_dump_date
 from catalogue.publish import build
+from catalogue.publish.dump import dump_document
+from catalogue.publish.index import index_files
 from catalogue.publish.limits import PublishLimits, load_limits
 from catalogue.publish.models import (
     SCHEMA_VERSION,
     AttributionsFile,
     AttributionsPart,
     CityFile,
-    IndexFile,
     ManifestFile,
 )
 from catalogue.publish.site import HEADERS, LANDING_PAGE, version_of
@@ -87,15 +86,6 @@ class PublishResult:
                 f"{t['summaries_left_out_no_credit']} summaries",
             ]
         )
-
-
-def _dump(model: type[BaseModel], document: dict[str, Any], name: str) -> bytes:
-    try:
-        model.model_validate(document)
-    except ValidationError:
-        raise PipelineError(f"{name} does not match its schema") from None
-    text = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return (text + "\n").encode("utf-8")
 
 
 def _verify_readiness(folder: Path, country_filter: str | None, dump_date: str) -> dict[str, Any]:
@@ -345,7 +335,7 @@ def run_publish_static(
         except (KeyError, TypeError, AttributeError):
             raise PipelineError("an input file has a damaged row") from None
         name = f"cities/{row['slug']}.json"
-        data = _dump(CityFile, city, name)
+        data = dump_document(CityFile, city, name)
         if len(data) > limits.max_file_bytes:
             raise PipelineError(
                 f"{name} is {len(data)} bytes, over the {limits.max_file_bytes} bytes limit"
@@ -405,17 +395,11 @@ def run_publish_static(
         for b in city["blocks"]:
             used |= {(s["page_id"], s["ordinal"]) for s in up.stops.get(b["id"], [])}
         notices |= {notice_of[k] for k in used if k in notice_of}
-    index = {"schema_version": SCHEMA_VERSION, "cities": index_cities}
-    files["index.json"] = _dump(IndexFile, index, "index.json")
-    if len(files["index.json"]) > limits.max_index_bytes:
-        raise PipelineError(
-            f"index.json is {len(files['index.json'])} bytes, over the {limits.max_index_bytes} "
-            "bytes limit; it needs sharding by country"
-        )
+    files |= index_files(index_cities, limits.max_index_bytes)
     parts: list[dict[str, Any]] = []
     for chunk in _chunks(entries, limits.attribution_part_bytes):
         name = f"attributions/part-{len(parts) + 1:03d}.json"
-        files[name] = _dump(
+        files[name] = dump_document(
             AttributionsPart, {"schema_version": SCHEMA_VERSION, "entries": chunk}, name
         )
         parts.append(
@@ -434,7 +418,7 @@ def run_publish_static(
         ],
         "parts": parts,
     }
-    files["attributions.json"] = _dump(AttributionsFile, attributions, "attributions.json")
+    files["attributions.json"] = dump_document(AttributionsFile, attributions, "attributions.json")
     if len(files) + 3 > limits.max_files:  # plus manifest.json, _headers and index.html
         raise PipelineError(
             f"{len(files) + 3} files, over the {limits.max_files} files limit; "
@@ -485,7 +469,7 @@ def run_publish_static(
         "counts": {k: totals[k] for k in ("cities", "photos", "summaries")},
         "files": {n: {"sha256": hashes[n], "bytes": len(files[n])} for n in hashes},
     }
-    files["manifest.json"] = _dump(ManifestFile, manifest, "manifest.json")
+    files["manifest.json"] = dump_document(ManifestFile, manifest, "manifest.json")
     if len(files["manifest.json"]) > limits.max_other_bytes:
         raise PipelineError(
             f"manifest.json is {len(files['manifest.json'])} bytes, over the "

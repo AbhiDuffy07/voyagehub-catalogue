@@ -123,7 +123,7 @@ def test_attributions_split_into_parts_under_the_size_target(tmp_path):
 def test_the_index_over_its_limit_stops_the_build(tmp_path):
     kwargs = publishfixture.build(tmp_path)
     limits = PublishLimits(max_files=100, max_file_bytes=10**6, max_index_bytes=100)
-    with pytest.raises(PipelineError, match="index.json.*sharding"):
+    with pytest.raises(PipelineError, match=r"index/in.json.*limit"):
         run_publish_static(**kwargs, limits=limits)
 
 
