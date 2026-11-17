@@ -49,6 +49,7 @@ from catalogue.publish.hero import (
     hero_problem,
     load_hero_rules,
 )
+from catalogue.readiness.near_miss import near_miss_csv, near_miss_markdown, near_misses
 from catalogue.readiness.rules import (
     FAILED_RULES,
     CityFacts,
@@ -71,6 +72,8 @@ OUTPUT_FILES = (
     "city_readiness.jsonl",
     "by_rule.csv",
     "by_country.csv",
+    "near_miss.csv",
+    "near_miss.md",
     "sample.md",
     "report.md",
     STATE_FILE,
@@ -525,7 +528,13 @@ def run_readiness(
     chosen += rng.sample(rest, min(SAMPLE_PER_TIER - SAMPLE_NEAR_MISS, len(rest)))
     sample = sorted(chosen, key=lambda r: (TIERS.index(r["tier"]), r["wikivoyage_page_id"]))
     write_text(target / "sample.md", _sample_text(sample))
-    write_text(target / "report.md", _report(totals, dump_date, rules))
+    near_table = near_misses(results)
+    write_text(target / "near_miss.csv", near_miss_csv(near_table))
+    write_text(target / "near_miss.md", near_miss_markdown(near_table))
+    write_text(
+        target / "report.md",
+        _report(totals, dump_date, rules) + "\n" + near_miss_markdown(near_table),
+    )
     write_manifest(
         target / "manifest.json",
         {
