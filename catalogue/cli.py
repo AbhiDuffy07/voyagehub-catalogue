@@ -36,6 +36,7 @@ from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
 from catalogue.prices.run import run_price_bands
 from catalogue.publish.deploy import PROJECT_NAME_DEFAULT, deploy
+from catalogue.publish.hero_sample import sample_heroes, write_sample
 from catalogue.publish.run import run_publish_static
 from catalogue.readiness.run import run_readiness
 from catalogue.settings import Settings, SettingsError, load_settings
@@ -303,6 +304,18 @@ def _parser() -> argparse.ArgumentParser:
     deploy_cmd.add_argument("--project-name", default=PROJECT_NAME_DEFAULT)
     deploy_cmd.add_argument("--branch", help="Pages branch; a non-production branch is a preview")
     deploy_cmd.add_argument("--yes", action="store_true", help="confirm that the site is published")
+
+    heroes = commands.add_parser(
+        "sample-heroes",
+        help="draw a seeded random sample of published city heroes (names and links) to review "
+        "(offline, reads the built site)",
+    )
+    heroes.add_argument("--site-dir", type=Path, required=True, help="the built site")
+    heroes.add_argument("--count", type=int, default=50, help="how many heroes (default 50)")
+    heroes.add_argument("--seed", type=int, default=1, help="same seed, same sample")
+    heroes.add_argument(
+        "--out-file", type=Path, help="default: heroes_sample.md next to the site folder"
+    )
 
     timezones = commands.add_parser(
         "derive-timezone",
@@ -617,6 +630,16 @@ def _publish_static(args: argparse.Namespace) -> None:
     print(f"site: {result.site_dir}")
 
 
+def _sample_heroes(args: argparse.Namespace) -> None:
+    if args.count < 1:
+        raise PipelineError("--count must be at least 1")
+    sample = sample_heroes(args.site_dir, args.count, args.seed)
+    target = args.out_file or args.site_dir.parent / "heroes_sample.md"
+    write_sample(sample, target, args.seed)
+    print(f"heroes: {len(sample.picked)} of {sample.with_hero} (seed {args.seed})")
+    print(f"file: {target}")
+
+
 def _deploy(args: argparse.Namespace) -> None:
     deploy(args.site_dir, project=args.project_name, branch=args.branch, confirmed=args.yes)
 
@@ -709,6 +732,8 @@ def main(
             _readiness(args)
         elif args.command == "publish-static":
             _publish_static(args)
+        elif args.command == "sample-heroes":
+            _sample_heroes(args)
         elif args.command == "deploy":
             _deploy(args)
         elif args.command == "photo-candidates":
