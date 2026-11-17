@@ -146,6 +146,7 @@ def test_headers_file_sets_cache_rules(tmp_path):
     result, _ = _build(tmp_path)
     text = (result.site_dir / "_headers").read_text(encoding="utf-8")
     assert "/v1/index.json" in text and "/v1/manifest.json" in text
+    assert "/v1/index/*" in text  # the per-country index files of a world run
 
 
 def test_data_files_are_revalidated_so_updates_reach_the_app(tmp_path):

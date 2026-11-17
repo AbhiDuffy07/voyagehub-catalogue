@@ -83,3 +83,11 @@ def test_each_network_stage_has_its_own_job_and_the_build_job_has_no_wikimedia_s
         assert f"python -m catalogue {command}" in blocks[job]
     for network in ("discover", "enrich-wikidata", "wikipedia-summary", "photo-candidates"):
         assert f"python -m catalogue {network}" not in blocks["build"]
+
+
+def test_the_hero_sample_runs_after_the_deploy_and_cannot_block_it():
+    assert CODE.index("python -m catalogue sample-heroes") > CODE.index(
+        "python -m catalogue deploy"
+    )
+    sample = CODE[CODE.index("Draw the hero photo review sample") :]
+    assert "continue-on-error: true" in sample.split("- name:")[0]

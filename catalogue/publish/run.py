@@ -426,7 +426,9 @@ def run_publish_static(
         )
 
     for name, data in files.items():
-        if not name.startswith("cities/") and name != "index.json":
+        if (
+            not name.startswith(("cities/", "index/")) and name != "index.json"
+        ):  # index_files checks those
             if len(data) > limits.max_other_bytes:
                 raise PipelineError(
                     f"{name} is {len(data)} bytes, over the {limits.max_other_bytes} bytes limit"

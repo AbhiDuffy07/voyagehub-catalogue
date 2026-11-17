@@ -100,3 +100,17 @@ def test_the_cli_writes_the_file_next_to_the_site(tmp_path, capsys):
     assert code == 0
     assert (site.parent / "heroes_sample.md").is_file()
     assert "5 of 10" in capsys.readouterr().out
+
+
+def test_a_pipe_or_line_break_in_a_caption_does_not_break_the_table(tmp_path):
+    site = make_site(tmp_path, n=1, caption=(0,))
+    path = site / "v1" / "cities" / "city-000.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["hero"]["caption"] = "Fort | the \nold gate"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    out = tmp_path / "heroes_sample.md"
+
+    write_sample(sample_heroes(site, 5, 1), out, seed=1)
+
+    row = [ln for ln in out.read_text(encoding="utf-8").splitlines() if ln.startswith("| IN |")]
+    assert len(row) == 1 and "Fort \\| the old gate" in row[0]

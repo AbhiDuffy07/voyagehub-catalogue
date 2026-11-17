@@ -125,7 +125,7 @@ def read_requests(articles_path: Path) -> list[ProposeRequest]:
                         regions=_regions(article),
                     )
                 )
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         raise PipelineError("the discover articles file is damaged; run discover again") from None
     return requests
 

@@ -56,6 +56,11 @@ def sample_heroes(site_dir: Path, count: int, seed: int) -> HeroSample:
     return HeroSample(cities=cities, with_hero=len(heroes), picked=picked)
 
 
+def _cell(text: str) -> str:
+    """One table cell: a pipe or a line break in the text must not split the row."""
+    return " ".join(text.replace("|", "\\|").split())
+
+
 def write_sample(sample: HeroSample, path: Path, seed: int) -> None:
     ordered = sorted(sample.picked, key=lambda p: (p["country_iso"] or "~", p["slug"]))
     lines = [
@@ -70,8 +75,6 @@ def write_sample(sample: HeroSample, path: Path, seed: int) -> None:
     ]
     for p in ordered:
         note = f"place photo: {p['caption']}" if p["caption"] else ""
-        lines.append(
-            f"| {p['country_iso'] or '-'} | {p['title']} | {p['thumb_url']} | {p['source_url']} "
-            f"| {note} |"
-        )
+        cells = (p["country_iso"] or "-", p["title"], p["thumb_url"], p["source_url"], note)
+        lines.append("| " + " | ".join(_cell(c) for c in cells) + " |")
     write_text(path, "\n".join(lines) + "\n")
