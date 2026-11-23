@@ -25,6 +25,7 @@ from catalogue.enrich.inputs import _rows, _sha256, verify_enrich_output
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import _safe_cell, parse_dump_date
+from catalogue.nearby.inputs import NearbyFolder, nearby_candidates, verify_nearby
 from catalogue.photos.run import INPUT_FILES, NO_COUNTRY, Subject, _percent, _subjects
 from catalogue.photos.select import (
     Choice,
@@ -161,6 +162,43 @@ def _candidates_by_subject(
             )
         grouped.setdefault(key, []).append(row)
     return grouped
+
+
+def _add_nearby(
+    nearby: NearbyFolder,
+    subjects: list[Subject],
+    by_key: dict[tuple[int, int], Subject],
+    candidates: dict[tuple[int, int], list[dict[str, Any]]],
+    subject_words: dict[tuple[int, int], frozenset[str]],
+    rules: SelectionRules,
+) -> None:
+    """`nearby` candidates join B5's: a listing or extra place with no facts row becomes a new
+    subject (named by the place itself), and every row is ranked by the same rules."""
+    for row in nearby_candidates(nearby):
+        try:
+            key = (row["page_id"], row["ordinal"])
+            for field in ("commons_file", "sources", "quality_marks", "flags", "usable"):
+                row[field]
+            name = str(row.get("subject_name") or "")
+        except KeyError:
+            raise PipelineError("nearby_candidates.jsonl has a damaged row") from None
+        if key not in by_key:
+            subject = Subject(
+                key[0],
+                key[1],
+                "listing",
+                row.get("listing_key"),
+                row.get("country_iso"),
+                row.get("wikidata_id"),
+                None,
+            )
+            subjects.append(subject)
+            by_key[key] = subject
+            subject_words[key] = frozenset(
+                name_words(name, rules.category_min_word, rules.generic_words)
+            )
+        candidates.setdefault(key, []).append(row)
+    subjects.sort(key=lambda s: (s.page_id, s.ordinal))
 
 
 # --- output rows --------------------------------------------------------------------------------
@@ -312,6 +350,7 @@ def run_photo_select(
     country_iso: str | None = None,
     rules: SelectionRules | None = None,
     rejected: frozenset[str] | None = None,
+    nearby_folder: Path | None = None,
 ) -> SelectResult:
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_selection_rules()
@@ -328,6 +367,14 @@ def run_photo_select(
     by_key = {(s.page_id, s.ordinal): s for s in subjects}
     candidates = _candidates_by_subject(photos_folder, by_key)
     subject_words = _subject_words(enrich_folder, rules)
+    nearby: NearbyFolder | None = None
+    if nearby_folder is not None:
+        nearby = verify_nearby(nearby_folder, country_filter)
+        if nearby.photo_candidates_manifest_sha256 != manifest_sha:
+            raise PipelineError(
+                "the nearby output was built from other photo candidates; run nearby again"
+            )
+        _add_nearby(nearby, subjects, by_key, candidates, subject_words, rules)
 
     seen_files = {
         normalise_file_name(c["commons_file"]) for rows_ in candidates.values() for c in rows_
@@ -468,6 +515,8 @@ def run_photo_select(
             "country_filter": country_filter,
             "generated_on": read_at,
             "photo_candidates_manifest_sha256": manifest_sha,
+            "nearby_manifest_sha256": nearby.manifest_sha256 if nearby else None,
+            "nearby_places_sha256": nearby.places_sha256 if nearby else None,
             "inputs_sha256": input_hashes,
             "rejected_files": len(rejected),
             "rejected_files_matching_no_candidate": unmatched_overrides,

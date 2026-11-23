@@ -8,8 +8,10 @@ unpublished only after `unpublish_after_failed_runs` not-ready runs in a row.
 """
 
 import tomllib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from catalogue.errors import PipelineError
 from catalogue.photos.select import _strings, _table
@@ -117,3 +119,16 @@ def decide_publication(
     if failed >= rules.unpublish_after_failed_runs:
         return CityState(False, failed), "unpublish"
     return CityState(True, failed), "keep_pending_unpublish"
+
+
+def place_owners(
+    rows: Iterable[Mapping[str, Any]], sections: Iterable[str]
+) -> dict[tuple[int, int], int]:
+    """(page_id, ordinal) -> owning city, for the listings readiness counts as places: a planned
+    section, not a duplicate, and a name (publish-static leaves an unnamed listing out)."""
+    wanted = set(sections)
+    return {
+        (r["page_id"], r["ordinal"]): r["owner_page_id"]
+        for r in rows
+        if r["kind"] in wanted and not r["duplicate_of"] and (r.get("name") or "").strip()
+    }

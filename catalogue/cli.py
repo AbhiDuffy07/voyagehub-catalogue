@@ -3,7 +3,7 @@
 Commands: version, check, and the jobs as they are built (discover in B2, fetch-listings in B3,
 enrich-wikidata, wikipedia-summary and derive-timezone in B4, photo-candidates in B5, photo-select
 in B6, draft-blocks in B8, auto-check in B10, price-bands in B11, readiness in B12, publish-static
-and deploy in B13; the rest arrive one by one in later sessions).
+and deploy in B13, nearby in B18; the rest arrive one by one in later sessions).
 A PipelineError ends the command with a one-line message and exit code 1, never a traceback.
 """
 
@@ -32,6 +32,7 @@ from catalogue.enrich.timezones import run_derive_timezone
 from catalogue.errors import PipelineError
 from catalogue.http import PoliteClient
 from catalogue.listings.run import run_fetch_listings
+from catalogue.nearby.run import run_nearby
 from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
 from catalogue.prices.run import run_price_bands
@@ -181,6 +182,27 @@ def _parser() -> argparse.ArgumentParser:
         "--enrich-dir", type=Path, default=Path("out/enrich"), help="where enrich-wikidata wrote"
     )
     selection.add_argument("--out-dir", type=Path, default=Path("out/photo_selection"))
+    selection.add_argument(
+        "--nearby-dir", type=Path, help="where nearby wrote (its candidates join the ranking)"
+    )
+
+    nearby = commands.add_parser(
+        "nearby",
+        help="more photographed places for short cities: Wikidata places and Commons geosearch "
+        "(network; reads a first photo-select pass)",
+    )
+    nearby.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    nearby.add_argument("--country", help="only this ISO country code (same as photo-select)")
+    for flag, default, help_text in (
+        ("--discover-dir", "out/discover", "where discover wrote (the world folder)"),
+        ("--listings-dir", "out/listings", "where fetch-listings wrote"),
+        ("--enrich-dir", "out/enrich", "where enrich-wikidata wrote"),
+        ("--photos-dir", "out/photos", "where photo-candidates wrote"),
+        ("--selection-dir", "out/photo_selection_first", "where the first photo-select wrote"),
+        ("--cache-dir", "out/cache", "where API replies are cached"),
+    ):
+        nearby.add_argument(flag, type=Path, default=Path(default), help=help_text)
+    nearby.add_argument("--out-dir", type=Path, default=Path("out/nearby"))
 
     blocks = commands.add_parser(
         "draft-blocks",
@@ -271,6 +293,9 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="the readiness folder of the previous run (carries the publication state)",
     )
+    readiness.add_argument(
+        "--nearby-dir", type=Path, help="where nearby wrote (the same folder photo-select read)"
+    )
     readiness.add_argument("--out-dir", type=Path, default=Path("out/readiness"))
 
     publish = commands.add_parser(
@@ -294,6 +319,9 @@ def _parser() -> argparse.ArgumentParser:
         ("--prices-dir", "out/prices", "where price-bands wrote"),
     ):
         publish.add_argument(flag, type=Path, default=Path(default), help=help_text)
+    publish.add_argument(
+        "--nearby-dir", type=Path, help="where nearby wrote (the same folder readiness read)"
+    )
     publish.add_argument("--out-dir", type=Path, default=Path("out/publish"))
 
     deploy_cmd = commands.add_parser(
@@ -523,6 +551,10 @@ def _photo_candidates(
     print(f"files: {result.output_dir}")
 
 
+def _nearby_folder(args: argparse.Namespace, folder: str) -> Path | None:
+    return args.nearby_dir / folder if args.nearby_dir else None
+
+
 def _photo_select(args: argparse.Namespace) -> None:
     folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
     result = run_photo_select(
@@ -532,7 +564,37 @@ def _photo_select(args: argparse.Namespace) -> None:
         dump_date=args.dump_date,
         today=datetime.now(UTC).date(),
         country_iso=args.country,
+        nearby_folder=_nearby_folder(args, folder),
     )
+    print(result.summary())
+    print(f"files: {result.output_dir}")
+
+
+def _nearby(
+    args: argparse.Namespace,
+    environ: Mapping[str, str] | None,
+    env_file: Path | str | None,
+    client_factory: Callable[[Settings], PoliteClient],
+) -> None:
+    settings = load_settings(environ, env_file)
+    folder = f"{args.dump_date}-{args.country.upper()}" if args.country else args.dump_date
+    client = client_factory(settings)
+    try:
+        result = run_nearby(
+            client,
+            discover_folder=args.discover_dir / args.dump_date,
+            listings_folder=args.listings_dir / folder,
+            enrich_folder=args.enrich_dir / folder,
+            photos_folder=args.photos_dir / folder,
+            selection_folder=args.selection_dir / folder,
+            out_dir=args.out_dir,
+            cache_dir=args.cache_dir,
+            dump_date=args.dump_date,
+            today=datetime.now(UTC).date(),
+            country_iso=args.country,
+        )
+    finally:
+        client.close()
     print(result.summary())
     print(f"files: {result.output_dir}")
 
@@ -602,6 +664,7 @@ def _readiness(args: argparse.Namespace) -> None:
         country_iso=args.country,
         previous_folder=args.previous,
         slugs_path=args.slugs_path,
+        nearby_folder=_nearby_folder(args, folder),
     )
     print(result.summary())
     print(f"files: {result.output_dir}")
@@ -625,6 +688,7 @@ def _publish_static(args: argparse.Namespace) -> None:
         dump_date=args.dump_date,
         today=datetime.now(UTC).date(),
         country_iso=args.country,
+        nearby_folder=_nearby_folder(args, folder),
     )
     print(result.summary())
     print(f"site: {result.site_dir}")
@@ -738,6 +802,8 @@ def main(
             _deploy(args)
         elif args.command == "photo-candidates":
             _photo_candidates(args, environ, env_file, client_factory)
+        elif args.command == "nearby":
+            _nearby(args, environ, env_file, client_factory)
         else:
             _check(args, environ, env_file, db_driver)
     except PipelineError as exc:

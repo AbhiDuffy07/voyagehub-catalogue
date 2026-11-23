@@ -40,6 +40,8 @@ from catalogue.enrich.inputs import _rows, _sha256
 from catalogue.errors import PipelineError
 from catalogue.listings.output import JsonlWriter
 from catalogue.listings.run import parse_dump_date
+from catalogue.nearby.inputs import PLACES_FILE as NEARBY_PLACES_FILE
+from catalogue.nearby.inputs import extra_places, nearby_for
 from catalogue.photos.select import REJECTED_PATH
 from catalogue.publish.build import photo_of
 from catalogue.publish.hero import (
@@ -58,6 +60,7 @@ from catalogue.readiness.rules import (
     assess_city,
     decide_publication,
     load_readiness_rules,
+    place_owners,
 )
 
 SCHEMA_VERSION = 1
@@ -279,6 +282,7 @@ def run_readiness(
     rules: ReadinessRules | None = None,
     slugs_path: Path = SLUGS_PATH,
     hero_rules: HeroRules | None = None,
+    nearby_folder: Path | None = None,
 ) -> ReadinessResult:
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_readiness_rules()
@@ -318,6 +322,11 @@ def run_readiness(
         raise PipelineError(
             "auto-check output was built from other draft blocks than these; run auto-check again"
         )
+    nearby = nearby_for(
+        _json_manifest(photos_folder, "photo-select"), nearby_folder, country_filter
+    )
+    if nearby is not None:
+        hashes[NEARBY_PLACES_FILE] = nearby.places_sha256
     previous = _read_previous(previous_folder, country_filter) if previous_folder else {}
     if previous_folder:
         hashes["previous_state.json"] = _sha256(previous_folder / STATE_FILE)
@@ -338,13 +347,11 @@ def run_readiness(
     cities = {pid: a for pid, a in articles.items() if a.get("type") in rules.eligible_types}
 
     try:
-        place_owner = {
-            (r["page_id"], r["ordinal"]): r["owner_page_id"]
-            for r in _rows(listings_folder / LISTINGS_FILE)
-            if r["kind"] in rules.place_sections
-            and not r["duplicate_of"]
-            and (r.get("name") or "").strip()  # publish-static leaves an unnamed listing out
-        }
+        # Listings and `nearby` extra places alike; publish-static leaves an unnamed one out.
+        place_owner = place_owners(
+            [*_rows(listings_folder / LISTINGS_FILE), *(extra_places(nearby) if nearby else [])],
+            rules.place_sections,
+        )
         has_summary = {
             r["page_id"]
             for r in _rows(summaries_folder / SUMMARIES_FILE)
