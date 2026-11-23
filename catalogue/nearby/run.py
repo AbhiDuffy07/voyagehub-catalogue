@@ -58,7 +58,16 @@ from catalogue.nearby.pick import (
     same_place,
 )
 from catalogue.nearby.rules import NearbyRules, load_nearby_rules
-from catalogue.photos.commons import COMMONS_API, FileInfo, _run_bounded, fetch_file_info
+from catalogue.photos.commons import (
+    BUSY_CODE,
+    BUSY_FIRST_WAIT,
+    BUSY_GIVE_UP,
+    BUSY_RETRIES,
+    COMMONS_API,
+    FileInfo,
+    _run_bounded,
+    fetch_file_info,
+)
 from catalogue.photos.rules import PhotoRules, load_photo_rules
 from catalogue.photos.run import INPUT_FILES, Candidate, Subject
 from catalogue.photos.run import _row as candidate_row
@@ -79,6 +88,9 @@ WIKIDATA_LICENCE = "CC0 1.0"
 WIKIDATA_LICENCE_URL = "https://creativecommons.org/publicdomain/zero/1.0/"
 WIKIDATA_ATTRIBUTION = "Wikidata contributors"
 ENTITY_BATCH = 50
+# GeoData searches run on the CirrusSearch backend, which limits searches per client and answers
+# `cirrussearch-too-busy-error` beyond that: one search at a time, like B5's category search.
+SEARCH_WORKERS = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,31 +168,60 @@ def _listing_point(
 # --- requests -----------------------------------------------------------------------------------
 
 
-def _geosearch(
-    cache: ApiCache,
-    client: PoliteClient,
-    url: str,
-    point: tuple[float, float],
-    radius_m: int,
-    limit: int,
-    extra: Mapping[str, str | int],
-) -> list[dict[str, Any]]:
-    reply = cache.get(
-        client,
-        url,
-        {
+class _Searcher:
+    """GeoData searches through the cache, one at a time. A "too busy" answer is waited out
+    (5, 10, 20, 40, 80 s); a search still busy after that is skipped (None) and counted, and after
+    BUSY_GIVE_UP busy searches in a row on one host the rest on that host are skipped too. Nothing
+    busy is cached, so a rerun fills the gaps."""
+
+    def __init__(self, cache: ApiCache, client: PoliteClient, sleep: Callable[[float], None]):
+        self._cache = cache
+        self._client = client
+        self._sleep = sleep
+        self._streak: Counter = Counter()
+        self.busy = 0
+
+    def __call__(
+        self,
+        url: str,
+        point: tuple[float, float],
+        radius_m: int,
+        limit: int,
+        extra: Mapping[str, str | int],
+    ) -> list[dict[str, Any]] | None:
+        params = {
             "action": "query",
             "list": "geosearch",
             "gscoord": f"{point[0]:.6f}|{point[1]:.6f}",
             "gsradius": radius_m,
             "gslimit": limit,
             **extra,
-        },
-    )
-    hits = reply.get("query", {}).get("geosearch")
-    if not isinstance(hits, list):
-        raise PipelineError(f"{url.split('/')[2]} answered a geosearch with an unexpected shape")
-    return [h for h in hits if isinstance(h, dict)]
+        }
+        if self._streak[url] >= BUSY_GIVE_UP:
+            self.busy += 1
+            return None
+        for attempt in range(BUSY_RETRIES + 1):
+            try:
+                reply = self._cache.get(self._client, url, params)
+                break
+            except PipelineError as exc:
+                if BUSY_CODE not in str(exc):
+                    raise
+                if attempt == BUSY_RETRIES:
+                    self._streak[url] += 1
+                    self.busy += 1
+                    return None
+                wait = BUSY_FIRST_WAIT * 2**attempt
+                host = url.split("/")[2]
+                print(f"{host} search is too busy; waiting {wait:.0f} s (retry {attempt + 1})")
+                self._sleep(wait)
+        self._streak[url] = 0
+        hits = reply.get("query", {}).get("geosearch")
+        if not isinstance(hits, list):
+            raise PipelineError(
+                f"{url.split('/')[2]} answered a geosearch with an unexpected shape"
+            )
+        return [h for h in hits if isinstance(h, dict)]
 
 
 def _hit_point(hit: Mapping[str, Any]) -> tuple[float, float] | None:
@@ -304,6 +345,8 @@ def _report(totals: Mapping[str, Any], dump_date: str, rules: NearbyRules) -> st
             f"{rules.search_radius_m} m, name-free band {rules.name_free_radius_m} m); given a "
             f"photo candidate: {totals['subjects_with_candidate']}",
             f"- candidate rows: {totals['candidate_rows']}",
+            f"- searches skipped because the search service stayed too busy: "
+            f"{totals['searches_busy']} (run again to fill them; the cache keeps the rest)",
             f"- requests sent: {totals['cache']['misses']}; answered from the cache: "
             f"{totals['cache']['hits']}",
             f"- rules version: {rules.version}",
@@ -458,6 +501,7 @@ def run_nearby(
             centres[pid] = centre
 
     cache = ApiCache(cache_dir, today, rules.cache_max_age_days, sleep=sleep)
+    search = _Searcher(cache, client, sleep)
     read_at = today.isoformat()
 
     # --- step 1: extra places from Wikidata -----------------------------------------------------
@@ -467,18 +511,16 @@ def run_nearby(
     near: dict[int, list[tuple[str, float]]] = {}
     for pid, hits in _run_bounded(
         searched_cities,
-        lambda pid: _geosearch(
-            cache,
-            client,
-            WIKIDATA_API,
-            centres[pid],
-            int(rules.places_radius_km * 1000),
-            rules.places_limit,
-            {},
+        lambda pid: search(
+            WIKIDATA_API, centres[pid], int(rules.places_radius_km * 1000), rules.places_limit, {}
         ),
         "Wikidata near cities",
+        workers=SEARCH_WORKERS,
     ):
         found: list[tuple[str, float]] = []
+        if hits is None:
+            places_skipped["city_search_busy"] += 1
+            hits = []
         for h in hits:
             qid = str(h.get("title") or "")
             if not (qid.startswith("Q") and qid[1:].isdigit()):
@@ -569,9 +611,7 @@ def run_nearby(
     geo_hits: dict[Place, list[GeoHit]] = {}
     for subject, hits in _run_bounded(
         subjects,
-        lambda s: _geosearch(
-            cache,
-            client,
+        lambda s: search(
             COMMONS_API,
             s.point,
             rules.search_radius_m,
@@ -579,8 +619,12 @@ def run_nearby(
             {"gsnamespace": 6, "gsprimary": "all"},
         ),
         "Commons files near places",
+        workers=SEARCH_WORKERS,
     ):
         found_hits: dict[str, GeoHit] = {}
+        if hits is None:
+            subjects_skipped["search_busy"] += 1
+            hits = []
         for h in hits:
             point = _hit_point(h)
             title = str(h.get("title") or "")
@@ -728,6 +772,7 @@ def run_nearby(
         "subjects": len(subjects),
         "subjects_with_candidate": with_candidate,
         "candidate_rows": len(candidate_rows),
+        "searches_busy": search.busy,
         "places_skipped": {k: v for k, v in sorted(places_skipped.items()) if v},
         "subjects_skipped": dict(sorted(subjects_skipped.items())),
         "geosearch_skipped": dict(sorted(geosearch_skipped.items())),

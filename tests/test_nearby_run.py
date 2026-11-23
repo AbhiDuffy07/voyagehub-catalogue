@@ -221,3 +221,56 @@ def _rewrite_listings(folders, listings):
     manifest = json.loads((lis / "manifest.json").read_text(encoding="utf-8"))
     manifest["outputs_sha256"]["listings.jsonl"] = jsonl(lis / "listings.jsonl", listings)
     write_manifest(lis, manifest)
+
+
+def _busy_first(answer, times, seen):
+    """Answer `cirrussearch-too-busy-error` to the first `times` geosearches, then normally."""
+    import httpx
+
+    def wrapped(request):
+        if request.url.params.get("list") == "geosearch" and len(seen) < times:
+            seen.append(1)
+            return httpx.Response(200, json={"error": {"code": "cirrussearch-too-busy-error"}})
+        return answer(request)
+
+    return wrapped
+
+
+@respx.mock
+def test_a_busy_search_is_waited_out_and_retried(client, tmp_path, capsys):
+    seen, waits = [], []
+    respx.get(WIKIDATA).mock(side_effect=_busy_first(fake_wikidata_api(), 2, seen))
+    respx.get(COMMONS).mock(side_effect=fake_commons_api())
+    result = run_nearby(client, **build(tmp_path), sleep=waits.append)
+    assert result.totals["extra_places"] == 2
+    assert waits[:2] == [5.0, 10.0]
+    assert result.totals["searches_busy"] == 0
+    busy_lines = [ln for ln in capsys.readouterr().out.splitlines() if "busy" in ln]
+    assert busy_lines == [
+        "www.wikidata.org search is too busy; waiting 5 s (retry 1)",
+        "www.wikidata.org search is too busy; waiting 10 s (retry 2)",
+    ]
+
+
+@respx.mock
+def test_a_search_that_stays_busy_is_skipped_counted_and_not_cached(client, tmp_path):
+    seen = []
+    folders = build(tmp_path)
+    respx.get(WIKIDATA).mock(side_effect=_busy_first(fake_wikidata_api(), 99, seen))
+    respx.get(COMMONS).mock(side_effect=fake_commons_api())
+    result = run_nearby(client, **folders, sleep=lambda s: None)
+    assert result.totals["extra_places"] == 0
+    assert result.totals["searches_busy"] == 1
+    assert result.totals["places_skipped"]["city_search_busy"] == 1
+    # The Commons search for Hawa Mahal still ran (Commons was not busy).
+    assert result.totals["subjects_with_candidate"] == 1
+    respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api())
+    again = run_nearby(client, **folders, sleep=lambda s: None)
+    assert again.totals["extra_places"] == 2  # a rerun fills it
+
+
+@respx.mock
+def test_searches_run_one_at_a_time(client, tmp_path, monkeypatch):
+    from catalogue.nearby import run as nearby_run
+
+    assert nearby_run.SEARCH_WORKERS == 1
