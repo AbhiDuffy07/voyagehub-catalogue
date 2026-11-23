@@ -23,6 +23,7 @@ from catalogue.blocks.run import run_draft_blocks
 from catalogue.db import connect, tls_in_use
 from catalogue.discover.dump import dump_filename, fetch_dump
 from catalogue.discover.overrides import load_country_iso_overrides
+from catalogue.discover.propose import run_propose_slugs
 from catalogue.discover.report import write_research
 from catalogue.discover.run import run_discover
 from catalogue.enrich.run import run_enrich_wikidata
@@ -35,6 +36,7 @@ from catalogue.photos.run import run_photo_candidates
 from catalogue.photos.select_run import run_photo_select
 from catalogue.prices.run import run_price_bands
 from catalogue.publish.deploy import PROJECT_NAME_DEFAULT, deploy
+from catalogue.publish.hero_sample import sample_heroes, write_sample
 from catalogue.publish.run import run_publish_static
 from catalogue.readiness.run import run_readiness
 from catalogue.settings import Settings, SettingsError, load_settings
@@ -77,6 +79,22 @@ def _parser() -> argparse.ArgumentParser:
         "--init-registry",
         action="store_true",
         help="allow a missing slug registry (a genuine first run only)",
+    )
+
+    propose = commands.add_parser(
+        "propose-slugs",
+        help="give a slug to every city article that has none and add it to data/slugs.json "
+        "(offline; existing slugs never change; commit the result in a reviewed pull request)",
+    )
+    propose.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
+    propose.add_argument(
+        "--discover-dir", type=Path, default=Path("out/discover"), help="where discover wrote"
+    )
+    propose.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="folder with the committed slug registry, slugs.json",
     )
 
     fetch = commands.add_parser(
@@ -287,6 +305,18 @@ def _parser() -> argparse.ArgumentParser:
     deploy_cmd.add_argument("--branch", help="Pages branch; a non-production branch is a preview")
     deploy_cmd.add_argument("--yes", action="store_true", help="confirm that the site is published")
 
+    heroes = commands.add_parser(
+        "sample-heroes",
+        help="draw a seeded random sample of published city heroes (names and links) to review "
+        "(offline, reads the built site)",
+    )
+    heroes.add_argument("--site-dir", type=Path, required=True, help="the built site")
+    heroes.add_argument("--count", type=int, default=50, help="how many heroes (default 50)")
+    heroes.add_argument("--seed", type=int, default=1, help="same seed, same sample")
+    heroes.add_argument(
+        "--out-file", type=Path, help="default: heroes_sample.md next to the site folder"
+    )
+
     timezones = commands.add_parser(
         "derive-timezone",
         help="derive each destination's IANA time zone from its coordinates (offline)",
@@ -382,6 +412,15 @@ def _discover(
     print(f"dump {args.dump_date}: checksum verified")
     print(result.summary(top=10))
     print(f"files: {result.output_dir}")
+
+
+def _propose_slugs(args: argparse.Namespace) -> None:
+    result = run_propose_slugs(
+        articles_path=args.discover_dir / args.dump_date / "articles.jsonl",
+        registry_path=args.data_dir / "slugs.json",
+    )
+    print(result.summary())
+    print(f"files: {result.report_path}")
 
 
 def _fetch_listings(args: argparse.Namespace) -> None:
@@ -591,6 +630,16 @@ def _publish_static(args: argparse.Namespace) -> None:
     print(f"site: {result.site_dir}")
 
 
+def _sample_heroes(args: argparse.Namespace) -> None:
+    if args.count < 1:
+        raise PipelineError("--count must be at least 1")
+    sample = sample_heroes(args.site_dir, args.count, args.seed)
+    target = args.out_file or args.site_dir.parent / "heroes_sample.md"
+    write_sample(sample, target, args.seed)
+    print(f"heroes: {len(sample.picked)} of {sample.with_hero} (seed {args.seed})")
+    print(f"file: {target}")
+
+
 def _deploy(args: argparse.Namespace) -> None:
     deploy(args.site_dir, project=args.project_name, branch=args.branch, confirmed=args.yes)
 
@@ -659,6 +708,8 @@ def main(
     try:
         if args.command == "discover":
             _discover(args, environ, env_file, client_factory)
+        elif args.command == "propose-slugs":
+            _propose_slugs(args)
         elif args.command == "report":
             _report(args)
         elif args.command == "fetch-listings":
@@ -681,6 +732,8 @@ def main(
             _readiness(args)
         elif args.command == "publish-static":
             _publish_static(args)
+        elif args.command == "sample-heroes":
+            _sample_heroes(args)
         elif args.command == "deploy":
             _deploy(args)
         elif args.command == "photo-candidates":

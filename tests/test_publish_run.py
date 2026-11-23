@@ -123,7 +123,7 @@ def test_attributions_split_into_parts_under_the_size_target(tmp_path):
 def test_the_index_over_its_limit_stops_the_build(tmp_path):
     kwargs = publishfixture.build(tmp_path)
     limits = PublishLimits(max_files=100, max_file_bytes=10**6, max_index_bytes=100)
-    with pytest.raises(PipelineError, match="index.json.*sharding"):
+    with pytest.raises(PipelineError, match=r"index/in.json.*limit"):
         run_publish_static(**kwargs, limits=limits)
 
 
@@ -146,6 +146,7 @@ def test_headers_file_sets_cache_rules(tmp_path):
     result, _ = _build(tmp_path)
     text = (result.site_dir / "_headers").read_text(encoding="utf-8")
     assert "/v1/index.json" in text and "/v1/manifest.json" in text
+    assert "/v1/index/*" in text  # the per-country index files of a world run
 
 
 def test_data_files_are_revalidated_so_updates_reach_the_app(tmp_path):

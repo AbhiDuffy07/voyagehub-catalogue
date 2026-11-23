@@ -1,9 +1,18 @@
 name: pipeline
 
-# Manual run of the whole catalogue pipeline for one country (India first), optionally followed by
-# a deploy to Cloudflare Pages. Runs only when the owner starts it; there is no schedule here.
+# Manual run of the whole catalogue pipeline for one country (India first) or for every country
+# (country = ALL), optionally followed by a deploy to Cloudflare Pages. Runs only when the owner
+# starts it; there is no schedule here.
 #
-# The job uses the `production` environment, which holds the secrets and is restricted to the main
+# The work is a chain of jobs that run one after another, never side by side: fetch (discover,
+# listings), enrich (Wikidata), summaries (Wikipedia), photos (Commons), then build (offline stages,
+# readiness, static site, deploy). Each network stage gets its own job so a world run does not have
+# to fit into one 6-hour job, and because the jobs run in sequence the request rate against the
+# Wikimedia APIs is never higher than in a single job (the program itself caps it at 3 requests at
+# once and 200 a minute, honours maxlag and Retry-After). The `out/` folder is handed from job to job
+# as a one-day artifact. Single-country runs use the same jobs.
+#
+# Every job uses the `production` environment, which holds the secrets and is restricted to the main
 # branch, so a workflow edited on another branch cannot read them. This repo is public: the logs
 # show only counts and PipelineError messages, so never add `set -x`, `env`, or an echo of a secret.
 # Secrets are passed only as step-level environment variables, never written into a command line.
@@ -15,7 +24,7 @@ on:
         required: true
         type: string
       country:
-        description: "ISO country code"
+        description: "ISO country code, or ALL for every country"
         required: true
         default: "IN"
         type: string
@@ -41,20 +50,21 @@ concurrency:
 env:
   DUMP_DATE: ${{ inputs.dump_date }}
   COUNTRY: ${{ inputs.country }}
+  # The folder name the jobs write: the dump date, plus -CC for one country. ALL has no suffix.
+  FOLDER: ${{ inputs.country == 'ALL' && inputs.dump_date || format('{0}-{1}', inputs.dump_date, inputs.country) }}
   PAGES_BRANCH: ${{ inputs.pages_branch }}
   PYTHONUNBUFFERED: "1"
 
 jobs:
-  pipeline:
+  fetch:
     runs-on: ubuntu-24.04
-    # A full India run is expected to take about 2 hours (see README); the hard limit is 6.
     timeout-minutes: 345
     environment: production
     steps:
       - name: Check the inputs
         run: |
           [[ "$DUMP_DATE" =~ ^[0-9]{8}$ ]] || { echo "dump_date must be eight digits"; exit 1; }
-          [[ "$COUNTRY" =~ ^[A-Z]{2}$ ]] || { echo "country must be two capital letters"; exit 1; }
+          [[ "$COUNTRY" =~ ^([A-Z]{2}|ALL)$ ]] || { echo "country must be two capital letters or ALL"; exit 1; }
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,7 +80,10 @@ jobs:
       - name: Discover (world folder; downloads and verifies the dump)
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
-        run: python -m catalogue discover --dump-date "$DUMP_DATE"
+        run: |
+          SECONDS=0
+          python -m catalogue discover --dump-date "$DUMP_DATE"
+          echo "stage seconds: $SECONDS"
 
       - name: The slug registry must not change in a pipeline run
         run: |
@@ -78,42 +91,182 @@ jobs:
             || { echo "data/slugs.json changed; slugs are assigned only in a reviewed PR"; exit 1; }
 
       - name: Fetch listings
-        run: python -m catalogue fetch-listings --dump-date "$DUMP_DATE" --country "$COUNTRY"
+        run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue fetch-listings --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
+
+      - name: Hand over to the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: out-fetch
+          path: out
+          retention-days: 1
+          if-no-files-found: error
+
+  enrich:
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: out-fetch
+          path: out
 
       - name: Enrich with Wikidata
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
-        run: python -m catalogue enrich-wikidata --dump-date "$DUMP_DATE" --country "$COUNTRY"
+        run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue enrich-wikidata --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
+
+      - name: Hand over to the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: out-enrich
+          path: out
+          retention-days: 1
+          if-no-files-found: error
+
+  summaries:
+    needs: enrich
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: out-enrich
+          path: out
 
       - name: Wikipedia summaries
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
-        run: python -m catalogue wikipedia-summary --dump-date "$DUMP_DATE" --country "$COUNTRY"
+        run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue wikipedia-summary --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
+
+      - name: Hand over to the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: out-summaries
+          path: out
+          retention-days: 1
+          if-no-files-found: error
+
+  photos:
+    needs: summaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: out-summaries
+          path: out
 
       - name: Photo candidates
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
-        run: python -m catalogue photo-candidates --dump-date "$DUMP_DATE" --country "$COUNTRY"
+        run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue photo-candidates --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
+
+      - name: Hand over to the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: out-photos
+          path: out
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    needs: photos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: out-photos
+          path: out
 
       - name: Select photos, time zones, blocks, checks and prices (offline)
         run: |
-          python -m catalogue photo-select --dump-date "$DUMP_DATE" --country "$COUNTRY"
-          python -m catalogue derive-timezone --dump-date "$DUMP_DATE" --country "$COUNTRY"
-          python -m catalogue draft-blocks --dump-date "$DUMP_DATE" --country "$COUNTRY"
-          python -m catalogue auto-check --dump-date "$DUMP_DATE" --country "$COUNTRY"
-          python -m catalogue price-bands --dump-date "$DUMP_DATE" --country "$COUNTRY"
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue derive-timezone --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue draft-blocks --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue auto-check --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue price-bands --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
 
-      # The state file lives in the `readiness-state-<CC>` artifact of the latest production run. Without
-      # one (first run, or older than the 90-day retention) every city counts as a first failure,
-      # which never unpublishes anything: the safe direction. The artifact is per country, and only
-      # production deploys save one, so a preview can never become the "previous" state.
+      # The state file lives in the `readiness-state-<CC or ALL>` artifact of the latest production
+      # run. Without one (first run, or older than the 90-day retention) every city counts as a
+      # first failure, which never unpublishes anything: the safe direction. The artifact is per
+      # country filter (ALL is its own), and only production deploys save one, so a preview can
+      # never become the "previous" state, and a world run never reads a country's state.
       - name: Fetch the previous readiness state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p previous-state
           # A failing listing stops the step (it must not look like a first run).
-          run_ids=$(gh run list --workflow pipeline.yml --status success --limit 20             --json databaseId --jq '.[].databaseId')
+          run_ids=$(gh run list --workflow pipeline.yml --status success --limit 50             --json databaseId --jq '.[].databaseId')
           for run_id in $run_ids; do
             if gh run download "$run_id" --name "readiness-state-$COUNTRY" --dir previous-state                 2> /dev/null; then
               echo "previous readiness state: found"
@@ -123,11 +276,17 @@ jobs:
           echo "previous readiness state: none found, starting without one"
 
       - name: Readiness, then build the static site (offline)
+        id: readiness
         run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
           previous=()
           if [ -f previous-state/state.json ]; then previous=(--previous previous-state); fi
-          python -m catalogue readiness --dump-date "$DUMP_DATE" --country "$COUNTRY" "${previous[@]}"
-          python -m catalogue publish-static --dump-date "$DUMP_DATE" --country "$COUNTRY"
+          python -m catalogue readiness --dump-date "$DUMP_DATE" "${args[@]}" "${previous[@]}"
+          # Counts only (no city names): safe for the public run summary.
+          cat "out/readiness/$FOLDER/near_miss.md" >> "$GITHUB_STEP_SUMMARY"
+          python -m catalogue publish-static --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
 
       - name: Deploy to Cloudflare Pages
         if: inputs.deploy
@@ -136,15 +295,38 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
           python -m catalogue deploy
-          --site-dir "out/publish/${DUMP_DATE}-${COUNTRY}/site"
+          --site-dir "out/publish/${FOLDER}/site"
           --branch "$PAGES_BRANCH" --yes
 
-      # Only after a successful production deploy, so the saved state matches what is live.
+      # Only after a successful production deploy, so the saved state matches what is live. One
+      # state.json holds every country of a world run, keyed by Wikivoyage page id.
       - name: Save the readiness state
         if: inputs.deploy && inputs.pages_branch == 'main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: readiness-state-${{ inputs.country }}
-          path: out/readiness/${{ inputs.dump_date }}-${{ inputs.country }}/state.json
+          path: out/readiness/${{ env.FOLDER }}/state.json
           retention-days: 90
           if-no-files-found: error
+
+      - name: Draw the hero photo review sample (50, seeded)
+        if: always() && steps.readiness.outcome == 'success'
+        continue-on-error: true
+        run: >-
+          python -m catalogue sample-heroes
+          --site-dir "out/publish/$FOLDER/site" --count 50 --seed "$DUMP_DATE"
+
+      - name: Keep the near-miss report and the hero sample
+        if: always() && steps.readiness.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: review-${{ inputs.country }}
+          path: |
+            out/readiness/${{ env.FOLDER }}/near_miss.csv
+            out/readiness/${{ env.FOLDER }}/near_miss.md
+            out/readiness/${{ env.FOLDER }}/by_country.csv
+            out/readiness/${{ env.FOLDER }}/by_rule.csv
+            out/readiness/${{ env.FOLDER }}/report.md
+            out/publish/${{ env.FOLDER }}/heroes_sample.md
+          retention-days: 30
+          if-no-files-found: warn

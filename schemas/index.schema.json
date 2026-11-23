@@ -118,6 +118,37 @@
       "title": "IndexCity",
       "type": "object"
     },
+    "IndexShard": {
+      "additionalProperties": false,
+      "properties": {
+        "cities": {
+          "title": "Cities",
+          "type": "integer"
+        },
+        "country_iso": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Country Iso"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "country_iso",
+        "file",
+        "cities"
+      ],
+      "title": "IndexShard",
+      "type": "object"
+    },
     "Photo": {
       "additionalProperties": false,
       "properties": {
@@ -186,23 +217,46 @@
     }
   },
   "additionalProperties": false,
+  "description": "Exactly one of `cities` (a flat index, also each shard file) or `shards` (the top file\nof a world-sized index, one entry per country file).",
   "properties": {
     "cities": {
-      "items": {
-        "$ref": "#/$defs/IndexCity"
-      },
-      "title": "Cities",
-      "type": "array"
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/IndexCity"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cities"
     },
     "schema_version": {
       "const": 1,
       "title": "Schema Version",
       "type": "integer"
+    },
+    "shards": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/IndexShard"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Shards"
     }
   },
   "required": [
-    "schema_version",
-    "cities"
+    "schema_version"
   ],
   "title": "IndexFile",
   "type": "object"

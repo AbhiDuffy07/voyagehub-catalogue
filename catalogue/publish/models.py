@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_VERSION = 1
 SLUG = r"^[a-z0-9]+(-[a-z0-9]+)*$"
@@ -148,9 +148,25 @@ class IndexCity(_Model):
     file: str
 
 
+class IndexShard(_Model):
+    country_iso: str | None
+    file: str
+    cities: int
+
+
 class IndexFile(_Model):
+    """Exactly one of `cities` (a flat index, also each shard file) or `shards` (the top file
+    of a world-sized index, one entry per country file)."""
+
     schema_version: Literal[1]
-    cities: list[IndexCity]
+    cities: list[IndexCity] | None = None
+    shards: list[IndexShard] | None = None
+
+    @model_validator(mode="after")
+    def _one_of_cities_or_shards(self) -> "IndexFile":
+        if (self.cities is None) == (self.shards is None):
+            raise ValueError("an index has either cities or shards")
+        return self
 
 
 class AttributionEntry(_Model):

@@ -4,9 +4,11 @@ import hashlib
 import re
 
 # Data files are revalidated on every load (the browser asks, Cloudflare answers 304 from the ETag
-# when nothing changed), so a new deploy reaches the app at once. Only the small index and manifest
-# may be served from cache, and only for a minute.
+# when nothing changed), so a new deploy reaches the app at once. Only the small index (and its
+# per-country shards in a world run) and the manifest may be served from cache, for a minute.
 HEADERS = """/v1/index.json
+  Cache-Control: public, max-age=60
+/v1/index/*
   Cache-Control: public, max-age=60
 /v1/manifest.json
   Cache-Control: public, max-age=60
