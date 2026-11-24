@@ -5,7 +5,7 @@
 # file (the "short" line is config/readiness_rules.toml's min_photographed_places). Change a value
 # only together with its reason, and bump rules_version (rows carry it).
 
-rules_version = 1
+rules_version = 2
 
 [geosearch]
 # Commons files within this many metres of a place's point are looked at (hard cap 150 m).
@@ -13,7 +13,7 @@ search_radius_m = 100
 # Up to this distance a file may be accepted without its name naming the place, but only when it
 # is unambiguous (see max_unnamed_files and ambiguity_margin_m). Further out, the file name must
 # share a word with the place name. 0 means a name match is always required.
-name_free_radius_m = 40
+name_free_radius_m = 0
 # More unnamed files than this inside name_free_radius_m means the point is a busy spot (a famous
 # square, a copied coordinate): none of the unnamed files is taken.
 max_unnamed_files = 3
@@ -30,7 +30,11 @@ evidence: at 0 m Commons also returns a thali, cloth work and a police officer, 
 copy the landmark's coordinates. So a name match is the main evidence, the name-free band is small \
 and switches off at busy points, and anything closer to another place is skipped. The owner's \
 check on the India run decides the name-free band: more than 10% wrong in a 40-photo sample sets \
-it to 0."""
+it to 0. Version 2 (2026-11-24): the India sample (seed 20261123, rules version 1, 40 m band) had 7 \
+of 40 wrong (17.5%): a crowd at an aarti and an information board came through the name-free band, \
+a river view matched only on the city name, and interiors or exhibits came through named files and \
+Wikidata images. So the band is 0 (a name match is always required), and the city's own name never \
+counts as a match (a code rule, not a value here)."""
 
 [places]
 # Wikidata items with a point within this many km of the city centre are looked at (the API caps

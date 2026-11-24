@@ -77,7 +77,8 @@ def test_items_that_are_not_new_visitor_places_are_skipped_and_counted(client, t
 def test_geosearch_finds_a_named_photo_and_skips_the_busy_point_and_the_small_file(
     client, tmp_path
 ):
-    result = run(client, build(tmp_path))
+    band = replace(load_nearby_rules(), name_free_radius_m=40)
+    result = run(client, build(tmp_path), rules=band)
     candidates = rows(result.output_dir / "nearby_candidates.jsonl")
     geo = [c for c in candidates if c["sources"] == ["commons_geosearch"]]
     assert [(c["page_id"], c["ordinal"], c["commons_file"]) for c in geo] == [
@@ -274,3 +275,42 @@ def test_searches_run_one_at_a_time(client, tmp_path, monkeypatch):
     from catalogue.nearby import run as nearby_run
 
     assert nearby_run.SEARCH_WORKERS == 1
+
+
+@respx.mock
+def test_the_city_name_in_a_place_name_is_no_name_match(client, tmp_path):
+    """A listing named after its city ("Jaipur Gate" in Jaipur) must not accept every Jaipur photo:
+    on the India sample "Omkareshwar Shiva Temple" took a river view named "...in Omkareshwar"."""
+    from tests import nearbyfixture as nf
+
+    folders = build(tmp_path)
+    listings = rows(folders["listings_folder"] / "listings.jsonl")
+    gate = nf.north(nf.HAWA, 700)
+    listings.append(listing(1, 5, 1, "Jaipur Gate", point=gate))
+    _rewrite_listings(folders, listings)
+    near = {
+        **nf.COMMONS_NEAR,
+        gate: [
+            ("File:Jaipur market 1.jpg", nf.north(gate, 60)),
+            ("File:Jaipur Gate at dusk.jpg", nf.north(gate, 70)),
+        ],
+    }
+    files = {
+        **nf.FILES,
+        "File:Jaipur market 1.jpg": nf.commons_file(sha1="m" * 40),
+        "File:Jaipur Gate at dusk.jpg": nf.commons_file(sha1="g" * 40),
+    }
+    respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api())
+    respx.get(COMMONS).mock(side_effect=fake_commons_api(files=files, near=near))
+    result = run_nearby(client, **folders, sleep=lambda s: None)
+    gate_rows = [
+        c
+        for c in rows(result.output_dir / "nearby_candidates.jsonl")
+        if (c["page_id"], c["ordinal"]) == (1, 5)
+    ]
+    assert [c["commons_file"] for c in gate_rows] == ["Jaipur Gate at dusk.jpg"]
+
+
+def test_the_committed_rules_always_require_a_name_match():
+    # Owner rule (2026-11-23): over 10% wrong in the 40-photo India sample sets the band to 0.
+    assert load_nearby_rules().name_free_radius_m == 0

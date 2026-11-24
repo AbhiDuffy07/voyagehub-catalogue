@@ -638,20 +638,24 @@ def run_nearby(
     geosearch_skipped: Counter = Counter()
     accepted_by_subject: dict[Place, list[Any]] = {}
     for subject in subjects:
+        # The city's own name says nothing about which place a file shows: "Narmada in
+        # Omkareshwar" is not "Omkareshwar Shiva Temple". Those words never count as a match.
+        city_words = place_words(str(cities[subject.owner].get("title") or ""), selection)
         others = [
-            OtherPlace(p.point, place_words(p.name, selection))
+            OtherPlace(p.point, place_words(p.name, selection) - city_words)
             for p in places_by_city[subject.owner]
             if p.point and (p.page_id, p.ordinal) != (subject.page_id, subject.ordinal)
         ] + [
             OtherPlace(
-                (item.coordinate.lat, item.coordinate.lon), place_words(item.label or "", selection)
+                (item.coordinate.lat, item.coordinate.lon),
+                place_words(item.label or "", selection) - city_words,
             )
             for _, item, _, _ in provisional.get(subject.owner, [])
             if item.coordinate
         ]
         accepted = accept_hits(
             geo_hits.get(subject, []),
-            place_words(subject.name, selection),
+            place_words(subject.name, selection) - city_words,
             others,
             rules,
             selection,

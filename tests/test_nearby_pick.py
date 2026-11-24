@@ -20,6 +20,8 @@ from catalogue.photos.select import load_selection_rules
 from catalogue.publish.hero import load_hero_rules
 
 RULES = load_nearby_rules()
+# The name-free band as a mechanism (the committed value is 0 since rules version 2).
+BAND = replace(RULES, name_free_radius_m=40)
 SELECTION = load_selection_rules()
 HERO = load_hero_rules()
 PHOTO_RULES = load_photo_rules()
@@ -33,7 +35,7 @@ def hit(title, metres, north=None):
     return GeoHit(f"File:{title}", (HERE[0] + north * M, HERE[1]), float(metres))
 
 
-def accept(hits, name="Hawa Mahal", others=(), rules=RULES):
+def accept(hits, name="Hawa Mahal", others=(), rules=BAND):
     skipped = Counter()
     found = accept_hits(hits, place_words(name, SELECTION), others, rules, SELECTION, HERO, skipped)
     return [a.hit.title.removeprefix("File:") for a in found], skipped
@@ -52,7 +54,7 @@ def test_a_file_beyond_the_search_radius_is_never_taken():
 
 
 def test_an_unnamed_file_needs_to_be_inside_the_name_free_band():
-    inside = RULES.name_free_radius_m
+    inside = BAND.name_free_radius_m
     titles, skipped = accept([hit("IMG 1.jpg", inside), hit("IMG 2.jpg", inside + 5)])
     assert titles == ["IMG 1.jpg"] and skipped["no_name_match"] == 1
 
