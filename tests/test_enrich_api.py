@@ -251,3 +251,136 @@ def test_the_non_db_line_names_the_type_and_the_unthrottled_retry(client, capsys
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 1
     assert "queryserviceinject" in out[0] and "without maxlag" in out[0]
+
+
+def api_error_reply(code, wait=None):
+    headers = {"Retry-After": wait} if wait else {}
+    return httpx.Response(
+        200, headers=headers, json={"error": {"code": code, "info": "secret@example.invalid"}}
+    )
+
+
+TRANSIENT_CODES = [
+    "cirrussearch-backend-error",
+    "internal_api_error_MWException",
+    "internal_api_error_DBQueryError",
+    "ratelimited",
+    "readonly",
+]
+
+
+@pytest.mark.parametrize("code", TRANSIENT_CODES)
+@respx.mock
+def test_a_temporary_api_error_is_retried_with_backoff_then_succeeds(client, code):
+    waits = []
+    respx.get(URL).mock(side_effect=[api_error_reply(code), httpx.Response(200, json={"ok": 1})])
+    assert api_get(client, URL, {"action": "query"}, sleep=waits.append) == {"ok": 1}
+    assert waits == [5.0]
+
+
+@respx.mock
+def test_temporary_error_waits_grow_and_respect_the_cap_and_the_budget(client):
+    waits = []
+    respx.get(URL).mock(side_effect=lambda request: api_error_reply("cirrussearch-backend-error"))
+    with pytest.raises(PipelineError) as raised:
+        api_get(client, URL, {"action": "query"}, sleep=waits.append)
+    assert "cirrussearch-backend-error" in str(raised.value)
+    assert "secret" not in str(raised.value)
+    assert waits == sorted(waits) and waits[0] < waits[3]
+    assert max(waits) <= MAX_LAG_WAIT
+    assert sum(waits) <= MAX_LAG_BUDGET
+    assert sum(waits) > MAX_LAG_BUDGET - MAX_LAG_WAIT
+    assert respx.calls.call_count == len(waits) + 1
+
+
+@respx.mock
+def test_a_retry_after_on_a_temporary_error_is_honoured(client):
+    waits = []
+    respx.get(URL).mock(
+        side_effect=[api_error_reply("ratelimited", "30"), httpx.Response(200, json={"ok": 1})]
+    )
+    api_get(client, URL, {"action": "query"}, sleep=waits.append)
+    assert waits == [30.0]
+
+
+@respx.mock
+def test_a_huge_retry_after_on_a_temporary_error_stops_instead_of_hanging(client):
+    respx.get(URL).mock(return_value=api_error_reply("readonly", "100000"))
+    with pytest.raises(PipelineError):
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert respx.calls.call_count == 1
+
+
+@respx.mock
+def test_the_temporary_error_line_shows_host_and_code_only(client, capsys):
+    respx.get(URL).mock(
+        side_effect=[
+            api_error_reply("internal_api_error_X"),
+            httpx.Response(200, json={"ok": 1}),
+        ]
+    )
+    api_get(client, URL, {"action": "query", "ids": "Q1"}, sleep=lambda s: None)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 1
+    assert "www.wikidata.org" in lines[0] and "internal_api_error_X" in lines[0]
+    assert "secret" not in lines[0] and "Q1" not in lines[0]
+
+
+@respx.mock
+def test_lag_and_temporary_errors_share_one_waiting_budget(client):
+    waits = []
+    replies = iter([maxlag_reply("1"), api_error_reply("readonly")])
+
+    def reply(request):
+        return next(replies, None) or maxlag_reply("1")
+
+    respx.get(URL).mock(side_effect=reply)
+    with pytest.raises(PipelineError):
+        api_get(client, URL, {"action": "query"}, sleep=waits.append)
+    assert sum(waits) <= MAX_LAG_BUDGET
+
+
+@respx.mock
+def test_other_error_codes_are_still_fatal_at_once(client):
+    route = respx.get(URL).mock(return_value=api_error_reply("badvalue"))
+    with pytest.raises(PipelineError):
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_the_too_busy_search_code_is_left_to_its_own_handler(client):
+    route = respx.get(URL).mock(return_value=api_error_reply("cirrussearch-too-busy-error"))
+    with pytest.raises(PipelineError) as raised:
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert "cirrussearch-too-busy-error" in str(raised.value)
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_http_5xx_that_outlasts_the_clients_own_retries_is_retried_by_api_get(client):
+    waits = []
+    replies = [httpx.Response(503)] * 4 + [httpx.Response(200, json={"ok": 1})]
+    route = respx.get(URL).mock(side_effect=replies)
+    assert api_get(client, URL, {"action": "query"}, sleep=waits.append) == {"ok": 1}
+    assert route.call_count == 5
+    assert waits == [5.0]
+
+
+@respx.mock
+def test_endless_http_5xx_fails_after_the_budget_with_a_safe_message(client):
+    waits = []
+    respx.get(URL).mock(return_value=httpx.Response(502, text="<html>secret</html>"))
+    with pytest.raises(PipelineError) as raised:
+        api_get(client, URL, {"action": "query"}, sleep=waits.append)
+    assert "502" in str(raised.value) and "secret" not in str(raised.value)
+    assert sum(waits) <= MAX_LAG_BUDGET and max(waits) <= MAX_LAG_WAIT
+    assert sum(waits) > MAX_LAG_BUDGET - MAX_LAG_WAIT
+
+
+@respx.mock
+def test_http_4xx_is_still_fatal_at_once(client):
+    route = respx.get(URL).mock(return_value=httpx.Response(404))
+    with pytest.raises(PipelineError):
+        api_get(client, URL, {"action": "query"}, sleep=lambda s: None)
+    assert route.call_count == 1

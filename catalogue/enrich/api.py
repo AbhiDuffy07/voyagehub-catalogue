@@ -14,7 +14,13 @@
 - Any other `error` object in the body becomes a PipelineError that shows the error code only,
   cleaned of anything but letters, digits, dash and underscore. The server's free-text `info` is
   never printed (the repository is public and so are its logs).
-- HTTP-level problems (429, 5xx, timeouts) are already handled by `PoliteClient`.
+- Temporary server trouble is retried, not fatal: the error codes `cirrussearch-backend-error`,
+  `internal_api_error_*`, `ratelimited` and `readonly`, and an HTTP 5xx that is still there after
+  `PoliteClient`'s own short retries. They use the same growing wait (5 s up to 60 s, a longer
+  Retry-After honoured) and share the 20-minute waiting budget with the lag waits; only when the
+  trouble keeps happening does the request stop, with the code or status only.
+  `cirrussearch-too-busy-error` stays with its own handler in `photos/commons.py`.
+- Other HTTP-level problems (429, timeouts) are handled by `PoliteClient`.
 """
 
 import re
@@ -25,13 +31,15 @@ from typing import Any
 import httpx
 
 from catalogue.errors import PipelineError
-from catalogue.http import PoliteClient
+from catalogue.http import PoliteClient, UpstreamError
 
 MAX_LAG = 5
 DEFAULT_LAG_WAIT = 5.0  # first wait, and the wait when the reply has no Retry-After
 MAX_LAG_WAIT = 60.0  # the growing back-off never goes above this per wait
 MAX_LAG_BUDGET = 1200.0  # seconds of waiting we are willing to spend on one request
 _SAFE_CODE = re.compile(r"[^A-Za-z0-9_-]")
+TRANSIENT_CODES = frozenset({"cirrussearch-backend-error", "ratelimited", "readonly"})
+TRANSIENT_PREFIX = "internal_api_error_"
 
 
 def _safe_code(code: object) -> str:
@@ -57,6 +65,32 @@ def _wait_seconds(response: httpx.Response) -> float:
     return float(value) if value.isdigit() else DEFAULT_LAG_WAIT
 
 
+def _is_transient(code: str) -> bool:
+    return code in TRANSIENT_CODES or code.startswith(TRANSIENT_PREFIX)
+
+
+def _back_off(
+    host: str,
+    what: str,
+    asked: float,
+    retries: int,
+    waited: float,
+    give_up: str,
+    sleep: Callable[[float], None],
+) -> float:
+    """Wait the growing back-off (or the longer Retry-After); stop when the budget is spent."""
+    wait = max(asked, min(DEFAULT_LAG_WAIT * 2**retries, MAX_LAG_WAIT))
+    if waited + wait > MAX_LAG_BUDGET:
+        raise PipelineError(give_up)
+    print(
+        f"{host} {what}; waiting {wait:.0f} s "
+        f"(retry {retries + 1}, {waited + wait:.0f} of {MAX_LAG_BUDGET:.0f} s used)",
+        flush=True,
+    )
+    sleep(wait)
+    return wait
+
+
 def api_get(
     client: PoliteClient,
     url: str,
@@ -68,10 +102,26 @@ def api_get(
     host = httpx.URL(url).host
     full: dict[str, str | int] = {**params, "format": "json", "maxlag": MAX_LAG}
     waited = 0.0
-    lag_replies = 0
+    retries = 0
     unthrottled = False
     while True:
-        response = client.get(url, params=full)
+        try:
+            response = client.get(url, params=full)
+        except UpstreamError as exc:
+            if exc.status is None or not 500 <= exc.status < 600:
+                raise
+            status = f"HTTP {exc.status}"
+            waited += _back_off(
+                host,
+                f"had a temporary error ({status})",
+                0.0,
+                retries,
+                waited,
+                f"{host} still answers {status} after retries; try again later",
+                sleep,
+            )
+            retries += 1
+            continue
         try:
             body = response.json()
         except ValueError:
@@ -81,9 +131,21 @@ def api_get(
         error = body.get("error")
         if error is None:
             return body
-        code = error.get("code") if isinstance(error, dict) else None
+        code = _safe_code(error.get("code")) if isinstance(error, dict) else "unknown"
+        if _is_transient(code):
+            waited += _back_off(
+                host,
+                f"had a temporary error ({code})",
+                _wait_seconds(response) if response.headers.get("Retry-After") else 0.0,
+                retries,
+                waited,
+                f"{host} API error: {code} (still failing after retries)",
+                sleep,
+            )
+            retries += 1
+            continue
         if code != "maxlag":
-            raise PipelineError(f"{host} API error: {_safe_code(code)}")
+            raise PipelineError(f"{host} API error: {code}")
         if unthrottled:
             raise PipelineError(f"{host} is still lagging after retries; try again later")
         lag_type = _lag_type(error)
@@ -93,15 +155,13 @@ def api_get(
             full = {k: v for k, v in full.items() if k != "maxlag"}
             unthrottled = True
             continue
-        asked = _wait_seconds(response)
-        wait = max(asked, min(DEFAULT_LAG_WAIT * 2**lag_replies, MAX_LAG_WAIT))
-        if waited + wait > MAX_LAG_BUDGET:
-            raise PipelineError(f"{host} is still lagging after retries; try again later")
-        lag_replies += 1
-        print(
-            f"{host} is lagging {detail}; waiting {wait:.0f} s "
-            f"(retry {lag_replies}, {waited + wait:.0f} of {MAX_LAG_BUDGET:.0f} s used)",
-            flush=True,
+        waited += _back_off(
+            host,
+            f"is lagging {detail}",
+            _wait_seconds(response),
+            retries,
+            waited,
+            f"{host} is still lagging after retries; try again later",
+            sleep,
         )
-        sleep(wait)
-        waited += wait
+        retries += 1
