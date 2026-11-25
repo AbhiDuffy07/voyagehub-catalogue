@@ -28,6 +28,8 @@ from catalogue.blocks.inputs import (
 from catalogue.enrich.inputs import _rows
 from catalogue.errors import PipelineError
 from catalogue.listings.run import parse_dump_date
+from catalogue.nearby.inputs import PLACES_FILE as NEARBY_PLACES_FILE
+from catalogue.nearby.inputs import extra_places, nearby_for
 from catalogue.publish import build
 from catalogue.publish.dump import dump_document
 from catalogue.publish.index import index_files
@@ -166,6 +168,7 @@ def run_publish_static(
     country_iso: str | None = None,
     limits: PublishLimits | None = None,
     rules: ReadinessRules | None = None,
+    nearby_folder: Path | None = None,
 ) -> PublishResult:
     parse_dump_date(dump_date)
     limits = limits if limits is not None else load_limits()
@@ -202,6 +205,11 @@ def run_publish_static(
         {n: digests[n] for n in (LISTINGS_FILE, SUMMARIES_FILE, PHOTOS_FILE, BLOCKS_FILE)}
         | {CHECKS_FILE: digests[CHECKS_FILE], TIMEZONES_FILE: digests[TIMEZONES_FILE]},
     )
+    nearby = nearby_for(_manifest(photos_folder, "photo-select"), nearby_folder, country_filter)
+    if nearby is not None:
+        _lineage(readiness_manifest, "readiness", {NEARBY_PLACES_FILE: nearby.places_sha256})
+    elif NEARBY_PLACES_FILE in (readiness_manifest.get("inputs_sha256") or {}):
+        raise PipelineError("readiness used nearby places; pass the same nearby folder")
     _lineage(
         _manifest(checks_folder, "auto-check"), "auto-check", {BLOCKS_FILE: digests[BLOCKS_FILE]}
     )
@@ -231,7 +239,8 @@ def run_publish_static(
         wanted = {r["wikivoyage_page_id"] for r in selected}
         place_rows: list[dict[str, Any]] = []
         notice_of: dict[tuple[int, int], tuple[str, str | None, str | None]] = {}
-        for r in _rows(listings_folder / LISTINGS_FILE):
+        extras = extra_places(nearby) if nearby else []
+        for r in [*_rows(listings_folder / LISTINGS_FILE), *extras]:
             if r["owner_page_id"] not in wanted:
                 continue
             if r.get("attribution"):

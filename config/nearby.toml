@@ -1,0 +1,68 @@
+# Rules for `nearby` (B18): more photographed places for cities that are short of them, from open
+# data. Two steps: (1) Wikidata items near the city centre that have a point and an image become
+# extra places; (2) Commons files near a place that has a point but no photo become candidates.
+# Nothing here is country-specific, and no readiness threshold is read from or written to this
+# file (the "short" line is config/readiness_rules.toml's min_photographed_places). Change a value
+# only together with its reason, and bump rules_version (rows carry it).
+
+rules_version = 3
+
+[geosearch]
+# false: no Commons geosearch at all; only Wikidata extra places (step 1) add photographed places.
+enabled = false
+# Commons files within this many metres of a place's point are looked at (hard cap 150 m).
+search_radius_m = 100
+# Up to this distance a file may be accepted without its name naming the place, but only when it
+# is unambiguous (see max_unnamed_files and ambiguity_margin_m). Further out, the file name must
+# share a word with the place name. 0 means a name match is always required.
+name_free_radius_m = 0
+# More unnamed files than this inside name_free_radius_m means the point is a busy spot (a famous
+# square, a copied coordinate): none of the unnamed files is taken.
+max_unnamed_files = 3
+# A file whose own point is no further than this from another place of the same city than from
+# this place could show either one: it is skipped unless its name names only this place.
+ambiguity_margin_m = 50
+# At most this many accepted files per place (named first, then nearest).
+max_photos_per_place = 3
+# Files asked for per place (Commons allows 500; the nearest come first).
+result_limit = 50
+reason = """Owner request 2026-11-23 (B18): India's near-miss report has 219 cities failing only \
+the 3-photographed-places rule. A probe at Hawa Mahal (Jaipur) showed why distance alone is weak \
+evidence: at 0 m Commons also returns a thali, cloth work and a police officer, because uploaders \
+copy the landmark's coordinates. So a name match is the main evidence, the name-free band is small \
+and switches off at busy points, and anything closer to another place is skipped. The owner's \
+check on the India run decides the name-free band: more than 10% wrong in a 40-photo sample sets \
+it to 0. Version 2 (2026-11-24): the India sample (seed 20261123, rules version 1, 40 m band) had 7 \
+of 40 wrong (17.5%): a crowd at an aarti and an information board came through the name-free band, \
+a river view matched only on the city name, and interiors or exhibits came through named files and \
+Wikidata images. So the band is 0 (a name match is always required), and the city's own name never \
+counts as a match (a code rule, not a value here). Version 3 (2026-11-25, owner ruling): the next \
+India sample (seed 20261125, rules version 2) still had 5 of 40 wrong (12.5%), and 4 of the 5 were \
+geosearch files (4 of 16): two information or road signs, a lobby display, an animal and another \
+shrine of the same complex, all with correctly named files, so no name rule can catch them. \
+Wikidata extra places had 1 of 24 wrong. So geosearch is off; the rules below stay for a later, \
+better check of what a file shows."""
+
+[places]
+# Wikidata items with a point within this many km of the city centre are looked at (the API caps
+# a search at 10 km). Same reach as draft-blocks' day_trip_km.
+radius_km = 8
+# Items asked for per city (the API's limit is 500; the nearest come first).
+result_limit = 500
+# Place kinds (config/kind_map.toml) an extra place may have: things a visitor goes to see.
+kinds = ["sight", "museum", "religious", "fort_palace", "park_nature", "viewpoint"]
+# At most this many extra places per city.
+max_per_city = 10
+# Same place as an existing listing or an earlier extra place: within same_place_km and sharing a
+# name word, or within any_name_km whatever the names.
+same_place_km = 0.15
+any_name_km = 0.04
+reason = """Owner request 2026-11-23 (B18). An extra place needs a Wikidata point, an English \
+label, one image that passes every photo check, a mapped visitor kind, the city's own country, and \
+it must be nearer to this city's centre than to any other city's (cities have no boundary in the \
+data, only a point). Items that are Wikivoyage destinations or already a listing are never added. \
+Prices and hours are never filled: an extra place has none, flagged unknown."""
+
+[cache]
+# Successful API replies are kept under out/cache/ and reused for this many days.
+max_age_days = 30

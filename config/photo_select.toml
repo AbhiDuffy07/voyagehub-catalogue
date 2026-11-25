@@ -49,8 +49,8 @@ generic_words = [
 ]
 
 [tiers]
-# Order of choice: Wikidata P18 (preferred rank first), then these, then everything else (tier 5,
-# empty until geosearch exists). A P18 file that is also Featured stays in the P18 tier.
+# Order of choice: Wikidata P18 (preferred rank first), then these, then everything else (tier 5:
+# files the `nearby` job found by geosearch). A P18 file that is also Featured stays in the P18 tier.
 featured = ["Featured pictures on Wikimedia Commons"]
 quality = ["Quality images"]
 valued = ["Valued images sorted by promotion date", "Valued images"]

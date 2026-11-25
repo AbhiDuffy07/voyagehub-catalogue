@@ -8,7 +8,7 @@ from scripts.check_workflows import problems
 PATH = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "pipeline.yml"
 TEXT = PATH.read_text(encoding="utf-8")
 CODE = "\n".join(ln for ln in TEXT.splitlines() if not ln.lstrip().startswith("#"))
-JOBS = ["fetch", "enrich", "summaries", "photos", "build"]
+JOBS = ["fetch", "enrich", "summaries", "photos", "nearby", "build"]
 
 
 def job_blocks():
@@ -50,7 +50,7 @@ def test_country_accepts_all_or_two_capitals_and_all_means_no_country_flag():
     assert all(ln.startswith('args=(); [ "$COUNTRY" = "ALL" ] || args=(') for ln in country_flag)
     needs_country = (
         "fetch-listings enrich-wikidata wikipedia-summary photo-candidates photo-select "
-        "derive-timezone draft-blocks auto-check price-bands readiness publish-static"
+        "derive-timezone draft-blocks auto-check price-bands readiness publish-static nearby"
     ).split()
     for line in CODE.splitlines():
         for command in needs_country:
@@ -79,9 +79,16 @@ def test_each_network_stage_has_its_own_job_and_the_build_job_has_no_wikimedia_s
         ("enrich", "enrich-wikidata"),
         ("summaries", "wikipedia-summary"),
         ("photos", "photo-candidates"),
+        ("nearby", "nearby"),
     ):
         assert f"python -m catalogue {command}" in blocks[job]
-    for network in ("discover", "enrich-wikidata", "wikipedia-summary", "photo-candidates"):
+    for network in (
+        "discover",
+        "enrich-wikidata",
+        "wikipedia-summary",
+        "photo-candidates",
+        "nearby",
+    ):
         assert f"python -m catalogue {network}" not in blocks["build"]
 
 
@@ -91,3 +98,18 @@ def test_the_hero_sample_runs_after_the_deploy_and_cannot_block_it():
     )
     sample = CODE[CODE.index("Draw the hero photo review sample") :]
     assert "continue-on-error: true" in sample.split("- name:")[0]
+
+
+def test_the_nearby_folder_reaches_photo_select_readiness_and_publish():
+    build = job_blocks()["build"]
+    # Each of these commands is continued onto a second line that names the nearby folder.
+    joined = build.replace("\\\n", " ")
+    for command in ("photo-select", "readiness", "publish-static"):
+        line = next(ln for ln in joined.splitlines() if f"python -m catalogue {command} " in ln)
+        assert "--nearby-dir out/nearby" in line, command
+    nearby = job_blocks()["nearby"]
+    assert nearby.index("--out-dir out/photo_selection_first") < nearby.index(
+        "python -m catalogue nearby "
+    )
+    assert "CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}" in nearby
+    assert "!out/cache" in nearby  # the cache stays out of the hand-over artifact

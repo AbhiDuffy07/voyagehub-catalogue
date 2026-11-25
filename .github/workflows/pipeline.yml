@@ -5,7 +5,8 @@ name: pipeline
 # starts it; there is no schedule here.
 #
 # The work is a chain of jobs that run one after another, never side by side: fetch (discover,
-# listings), enrich (Wikidata), summaries (Wikipedia), photos (Commons), then build (offline stages,
+# listings), enrich (Wikidata), summaries (Wikipedia), photos (Commons), nearby (extra places from
+# Wikidata for cities short of photographed places; Commons geosearch is off), then build (offline stages,
 # readiness, static site, deploy). Each network stage gets its own job so a world run does not have
 # to fit into one 6-hour job, and because the jobs run in sequence the request rate against the
 # Wikimedia APIs is never higher than in a single job (the program itself caps it at 3 requests at
@@ -222,7 +223,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  build:
+  nearby:
     needs: photos
     runs-on: ubuntu-24.04
     timeout-minutes: 345
@@ -244,11 +245,61 @@ jobs:
           name: out-photos
           path: out
 
+      # A first photo-select pass says which cities are short of photographed places; nearby looks
+      # only at those. The build job selects again with the nearby candidates.
+      - name: First photo selection (offline)
+        run: |
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"             --out-dir out/photo_selection_first
+
+      # With country ALL this step probably passes the job's 345 minutes (about 48,000 requests,
+      # see README "World run and time"): run worlds country by country until nearby has a deadline.
+      - name: Nearby places from Wikidata
+        env:
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
+        run: |
+          SECONDS=0
+          args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
+          python -m catalogue nearby --dump-date "$DUMP_DATE" "${args[@]}"
+          echo "stage seconds: $SECONDS"
+
+      - name: Hand over to the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: out-nearby
+          path: |
+            out
+            !out/cache
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    needs: nearby
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: out-nearby
+          path: out
+
       - name: Select photos, time zones, blocks, checks and prices (offline)
         run: |
           SECONDS=0
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
-          python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"             --nearby-dir out/nearby
           python -m catalogue derive-timezone --dump-date "$DUMP_DATE" "${args[@]}"
           python -m catalogue draft-blocks --dump-date "$DUMP_DATE" "${args[@]}"
           python -m catalogue auto-check --dump-date "$DUMP_DATE" "${args[@]}"
@@ -282,10 +333,10 @@ jobs:
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
           previous=()
           if [ -f previous-state/state.json ]; then previous=(--previous previous-state); fi
-          python -m catalogue readiness --dump-date "$DUMP_DATE" "${args[@]}" "${previous[@]}"
+          python -m catalogue readiness --dump-date "$DUMP_DATE" "${args[@]}" "${previous[@]}"             --nearby-dir out/nearby
           # Counts only (no city names): safe for the public run summary.
           cat "out/readiness/$FOLDER/near_miss.md" >> "$GITHUB_STEP_SUMMARY"
-          python -m catalogue publish-static --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue publish-static --dump-date "$DUMP_DATE" "${args[@]}"             --nearby-dir out/nearby
           echo "stage seconds: $SECONDS"
 
       - name: Deploy to Cloudflare Pages
@@ -327,6 +378,7 @@ jobs:
             out/readiness/${{ env.FOLDER }}/by_country.csv
             out/readiness/${{ env.FOLDER }}/by_rule.csv
             out/readiness/${{ env.FOLDER }}/report.md
+            out/nearby/${{ env.FOLDER }}/report.md
             out/publish/${{ env.FOLDER }}/heroes_sample.md
           retention-days: 30
           if-no-files-found: warn

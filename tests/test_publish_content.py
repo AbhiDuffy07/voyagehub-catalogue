@@ -130,6 +130,27 @@ def test_a_place_photo_with_a_garbled_author_is_not_used_as_a_fallback_hero():
     assert b.fallback_hero(7, up) is None
 
 
+def _geo_row(file="Fort near.jpg", sources=("commons_geosearch",)):
+    row = _row(file)
+    row["photo"] = {**row["photo"], "sources": list(sources)}
+    return row
+
+
+def test_a_photo_found_only_by_geosearch_is_never_a_hero():
+    assert hero_problem(_geo_row(), load_hero_rules()) == "geosearch"
+
+
+def test_a_wikidata_image_also_found_by_geosearch_may_still_be_a_hero():
+    row = _geo_row(sources=("commons_geosearch", "wikidata_p18"))
+    assert hero_problem(row, load_hero_rules()) is None
+
+
+def test_a_geosearch_place_photo_is_never_the_fallback_city_hero():
+    up = _up({("listing", 7, 1): _geo_row()}, [_place(1, "Fort")])
+    assert b.fallback_hero(7, up) is None
+    assert b.build_city(CITY, up)["hero"] is None
+
+
 # --- thumb width -----------------------------------------------------------------------------
 
 

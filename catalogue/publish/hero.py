@@ -3,7 +3,9 @@ credits any published photo may carry.
 
 B6 chose each photo for its own purpose (a 640 px gate, drop words, an override list). A hero is
 shown large at the top of a city, so it must also be hero size (B6 `hero_quality`), must not be a
-collage by file name, and must have a real author. Nothing here is country-specific.
+collage by file name, and must have a real author. A photo found only by the Commons geosearch of
+`nearby` (B18) is never a hero (owner ruling 2026-11-23): it is near a place, not chosen for a
+city cover. Nothing here is country-specific.
 """
 
 import re
@@ -23,6 +25,7 @@ from catalogue.photos.select import (
 
 EMAIL = re.compile(r"\S+@\S+\.\S+")
 HEROES_PATH = Path(__file__).resolve().parent.parent.parent / "overrides" / "rejected_heroes.csv"
+GEOSEARCH_SOURCE = "commons_geosearch"
 CONTENT_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "publish_content.toml"
 
 
@@ -72,8 +75,12 @@ def load_hero_rules(
 
 
 def hero_problem(row: dict[str, Any], rules: HeroRules) -> str | None:
-    """Why a B6 photo row may not be a hero (`size`, `override`, `name`, `author`), else None."""
+    """Why a B6 photo row may not be a hero (`geosearch`, `size`, `override`, `name`, `author`),
+    else None."""
     photo = row.get("photo") or {}
+    sources = set(photo.get("sources") or ())
+    if GEOSEARCH_SOURCE in sources and "wikidata_p18" not in sources:
+        return "geosearch"
     if not row.get("hero_quality"):
         return "size"
     name = normalise_file_name(str(photo.get("commons_file") or ""))

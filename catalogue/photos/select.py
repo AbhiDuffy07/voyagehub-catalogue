@@ -215,6 +215,8 @@ def _about_the_subject(
 ) -> bool:
     if "wikidata_p18" in row["sources"]:
         return True  # the item's own image
+    if "commons_geosearch" in row["sources"]:
+        return True  # `nearby` already required a name match or an unambiguous, very close file
     stem = str(row["commons_file"]).rsplit(".", 1)[0]
     words = name_words(stem, rules.category_min_word, rules.generic_words)
     return bool(words & subject_words)
