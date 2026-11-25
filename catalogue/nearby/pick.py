@@ -5,7 +5,8 @@ Nothing is guessed. A file or item that could belong to something else is skippe
 is counted under a reason so the report can show what the rules cost.
 """
 
-from collections import Counter
+import math
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -174,3 +175,45 @@ def nearest_city(point: Point, centres: Mapping[int, Point]) -> int | None:
         if best is None or candidate < best:
             best = candidate
     return None if best is None else best[1]
+
+
+class CentreIndex:
+    """City centres in a 0.1-degree grid, so "which city centre is nearest" looks only at centres
+    that could be nearer than the city's own (a world run has about 22,000 centres). Gives exactly
+    the answer of `nearest_city`, ties included."""
+
+    CELL = 0.1  # degrees
+    CELLS_AROUND = round(360 / CELL)
+
+    def __init__(self, centres: Mapping[int, Point]) -> None:
+        self._centres = dict(centres)
+        self._grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for pid, (lat, lon) in self._centres.items():
+            self._grid[self._cell(lat, lon)].append(pid)
+
+    def _cell(self, lat: float, lon: float) -> tuple[int, int]:
+        return math.floor(lat / self.CELL), math.floor(lon / self.CELL) % self.CELLS_AROUND
+
+    def nearest(self, point: Point, max_km: float, own: int) -> int | None:
+        """The nearest centre to `point`, which is within `max_km` of the centre of city `own`
+        (any nearer centre is then within that distance too). Falls back to a full scan when the
+        search box would be too wide (near a pole, or the point is far from its own centre)."""
+        radius = distance_km(point, self._centres[own]) + 1e-9
+        if radius > max_km:
+            return nearest_city(point, self._centres)
+        dlat = radius / 111.0 + self.CELL
+        top = min(89.9, abs(point[0]) + dlat)
+        dlon = radius / (111.0 * math.cos(math.radians(top))) + self.CELL
+        if dlon >= 90:
+            return nearest_city(point, self._centres)
+        low_lat, _ = self._cell(point[0] - dlat, 0.0)
+        high_lat, _ = self._cell(point[0] + dlat, 0.0)
+        first_lon = math.floor((point[1] - dlon) / self.CELL)
+        last_lon = math.floor((point[1] + dlon) / self.CELL)
+        nearby = {
+            pid
+            for row in range(low_lat, high_lat + 1)
+            for col in range(first_lon, last_lon + 1)
+            for pid in self._grid.get((row, col % self.CELLS_AROUND), ())
+        }
+        return nearest_city(point, {pid: self._centres[pid] for pid in nearby})

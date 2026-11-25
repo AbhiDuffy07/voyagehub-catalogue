@@ -314,3 +314,19 @@ def test_the_city_name_in_a_place_name_is_no_name_match(client, tmp_path):
 def test_the_committed_rules_always_require_a_name_match():
     # Owner rule (2026-11-23): over 10% wrong in the 40-photo India sample sets the band to 0.
     assert load_nearby_rules().name_free_radius_m == 0
+
+
+@respx.mock
+def test_a_duplicate_listing_does_not_make_the_original_ambiguous(client, tmp_path):
+    folders = build(tmp_path)
+    listings = rows(folders["listings_folder"] / "listings.jsonl")
+    listings.append(listing(1, 6, 1, "Hawa Mahal", point=HAWA, duplicate_of="see:hawa-mahal"))
+    _rewrite_listings(folders, listings)
+    result = run(client, folders)
+    geo = [
+        c["commons_file"]
+        for c in rows(result.output_dir / "nearby_candidates.jsonl")
+        if c["sources"] == ["commons_geosearch"]
+    ]
+    assert geo == ["Hawa Mahal16.jpg"]
+    assert result.totals["geosearch_skipped"].get("ambiguous", 0) == 0

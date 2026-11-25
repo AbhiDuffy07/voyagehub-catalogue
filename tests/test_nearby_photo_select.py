@@ -96,3 +96,12 @@ def test_nearby_output_from_other_photo_candidates_is_refused(world, tmp_path):
     with pytest.raises(PipelineError) as raised:
         select(folders, nearby_dir, tmp_path)
     assert "nearby" in str(raised.value)
+
+
+def test_nearby_subjects_are_counted_apart_from_b5_coverage(world, tmp_path):
+    folders, nearby_dir = world
+    without = select(folders, None, tmp_path / "a").totals
+    result = select(folders, nearby_dir, tmp_path / "b").totals
+    assert result["coverage"] == without["coverage"]
+    # Hawa Mahal and the two extra places had no facts row: they are nearby's own subjects.
+    assert result["nearby_subjects"] == 3 and result["nearby_selected"] == 3

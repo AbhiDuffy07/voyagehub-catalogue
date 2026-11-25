@@ -48,11 +48,11 @@ from catalogue.listings.run import parse_dump_date
 from catalogue.nearby.cache import ApiCache
 from catalogue.nearby.inputs import CANDIDATES_FILE, PLACES_FILE
 from catalogue.nearby.pick import (
+    CentreIndex,
     GeoHit,
     KnownPlace,
     OtherPlace,
     accept_hits,
-    nearest_city,
     photo_problem,
     place_words,
     same_place,
@@ -452,7 +452,9 @@ def run_nearby(
     point_status: dict[tuple[int, int], str] = {}
     for r in listings:
         owner = r["owner_page_id"]
-        if owner not in short:
+        # A duplicate is the same place listed twice: it is neither a subject nor "another place"
+        # (it would make every photo of its original look ambiguous).
+        if owner not in short or r["duplicate_of"]:
             continue
         key = (r["page_id"], r["ordinal"])
         fact = facts.get(key)
@@ -500,6 +502,7 @@ def run_nearby(
         if centre:
             centres[pid] = centre
 
+    centre_index = CentreIndex(centres)
     cache = ApiCache(cache_dir, today, rules.cache_max_age_days, sleep=sleep)
     search = _Searcher(cache, client, sleep)
     read_at = today.isoformat()
@@ -582,7 +585,7 @@ def run_nearby(
                 places_skipped["other_country"] += 1
                 continue
             point = (item.coordinate.lat, item.coordinate.lon)
-            if nearest_city(point, centres) != pid:
+            if centre_index.nearest(point, rules.places_radius_km, pid) != pid:
                 places_skipped["nearer_other_city"] += 1
                 continue
             words = place_words(item.label, selection)

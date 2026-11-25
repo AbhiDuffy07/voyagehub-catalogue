@@ -201,3 +201,20 @@ def test_nearest_city_breaks_ties_by_page_id():
     assert nearest_city(HERE, {7: (HERE[0] + 0.1, HERE[1]), 3: (HERE[0] - 0.1, HERE[1])}) == 3
     assert nearest_city(HERE, {7: HERE, 3: (HERE[0] + 1, HERE[1])}) == 7
     assert nearest_city(HERE, {}) is None
+
+
+def test_the_centre_index_agrees_with_a_full_scan_everywhere():
+    import random
+
+    from catalogue.nearby.pick import CentreIndex
+
+    rng = random.Random(7)  # noqa: S311 - reproducible test points, not security
+    centres = {i: (rng.uniform(-70, 70), rng.uniform(-180, 180)) for i in range(400)}
+    # Dense clusters, the date line and a high latitude, where degree cells are narrow.
+    centres |= {1000 + i: (26.9 + i * 0.01, 75.8) for i in range(30)}
+    centres |= {2000: (10.0, 179.99), 2001: (10.0, -179.99), 2002: (69.5, 20.0), 2003: (69.5, 20.2)}
+    index = CentreIndex(centres)
+    for pid, centre in centres.items():
+        for _ in range(5):
+            point = (centre[0] + rng.uniform(-0.07, 0.07), centre[1] + rng.uniform(-0.07, 0.07))
+            assert index.nearest(point, 8.0, pid) == nearest_city(point, centres), (pid, point)

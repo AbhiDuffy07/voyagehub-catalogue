@@ -171,9 +171,11 @@ def _add_nearby(
     candidates: dict[tuple[int, int], list[dict[str, Any]]],
     subject_words: dict[tuple[int, int], frozenset[str]],
     rules: SelectionRules,
-) -> None:
+) -> set[tuple[int, int]]:
     """`nearby` candidates join B5's: a listing or extra place with no facts row becomes a new
-    subject (named by the place itself), and every row is ranked by the same rules."""
+    subject (named by the place itself), and every row is ranked by the same rules. Returns the
+    new subjects, which B5's coverage denominators never counted."""
+    added: set[tuple[int, int]] = set()
     for row in nearby_candidates(nearby):
         try:
             key = (row["page_id"], row["ordinal"])
@@ -194,11 +196,13 @@ def _add_nearby(
             )
             subjects.append(subject)
             by_key[key] = subject
+            added.add(key)
             subject_words[key] = frozenset(
                 name_words(name, rules.category_min_word, rules.generic_words)
             )
         candidates.setdefault(key, []).append(row)
     subjects.sort(key=lambda s: (s.page_id, s.ordinal))
+    return added
 
 
 # --- output rows --------------------------------------------------------------------------------
@@ -368,13 +372,14 @@ def run_photo_select(
     candidates = _candidates_by_subject(photos_folder, by_key)
     subject_words = _subject_words(enrich_folder, rules)
     nearby: NearbyFolder | None = None
+    nearby_only: set[tuple[int, int]] = set()
     if nearby_folder is not None:
         nearby = verify_nearby(nearby_folder, country_filter)
         if nearby.photo_candidates_manifest_sha256 != manifest_sha:
             raise PipelineError(
                 "the nearby output was built from other photo candidates; run nearby again"
             )
-        _add_nearby(nearby, subjects, by_key, candidates, subject_words, rules)
+        nearby_only = _add_nearby(nearby, subjects, by_key, candidates, subject_words, rules)
 
     seen_files = {
         normalise_file_name(c["commons_file"]) for rows_ in candidates.values() for c in rows_
@@ -389,7 +394,7 @@ def run_photo_select(
     by_country_flag: Counter = Counter()
     tiers: Counter = Counter()
     lost: list[list[Any]] = []
-    covered = portrait = hero = 0
+    covered = portrait = hero = nearby_selected = 0
     with JsonlWriter(target / "photo_selection.jsonl") as out:
         for subject in subjects:
             key = (subject.page_id, subject.ordinal)
@@ -398,10 +403,15 @@ def run_photo_select(
             out.write(row)
             rows.append(row)
             country, plural = subject.country_iso or NO_COUNTRY, f"{subject.kind}s"
-            subject_count[(country, plural)] += 1
+            # Coverage stays B5's own: subjects only nearby knows are counted apart.
+            if key not in nearby_only:
+                subject_count[(country, plural)] += 1
             covered += choice.covered
             if choice.chosen is not None:
-                selected[(country, plural)] += 1
+                if key in nearby_only:
+                    nearby_selected += 1
+                else:
+                    selected[(country, plural)] += 1
                 tiers[choice.tier] += 1
                 portrait += choice.portrait
                 hero += choice.hero_quality
@@ -451,7 +461,9 @@ def run_photo_select(
         "subjects": len(subjects),
         "articles": sum(s.kind == "article" for s in subjects),
         "listings": sum(s.kind == "listing" for s in subjects),
-        "selected": sum(selected.values()),
+        "selected": sum(selected.values()) + nearby_selected,
+        "nearby_subjects": len(nearby_only),
+        "nearby_selected": nearby_selected,
         "portrait": portrait,
         "hero_quality": hero,
         "tiers": dict(sorted(tiers.items())),
