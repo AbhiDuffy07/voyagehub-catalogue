@@ -18,6 +18,7 @@ MAX_RESULT_LIMIT = 500  # the GeoData API's own limit per request
 @dataclass(frozen=True, slots=True)
 class NearbyRules:
     version: int
+    geosearch_enabled: bool
     search_radius_m: int
     name_free_radius_m: int
     max_unnamed_files: int
@@ -80,6 +81,9 @@ def load_nearby_rules(path: Path = NEARBY_RULES_PATH) -> NearbyRules:
     cache = _table(document, "cache", source)
     _reason(geo, "geosearch", source)
     _reason(places, "places", source)
+    enabled = geo.get("enabled")
+    if not isinstance(enabled, bool):
+        raise PipelineError(f"{source}: enabled needs true or false")
     radius = _number(geo, "search_radius_m", source, high=MAX_SEARCH_RADIUS_M)
     name_free = _number(geo, "name_free_radius_m", source, high=radius, zero_ok=True)
     kinds = places.get("kinds")
@@ -87,6 +91,7 @@ def load_nearby_rules(path: Path = NEARBY_RULES_PATH) -> NearbyRules:
         raise PipelineError(f"{source}: kinds needs a non-empty list of place kinds")
     return NearbyRules(
         version=version,
+        geosearch_enabled=enabled,
         search_radius_m=radius,
         name_free_radius_m=name_free,
         max_unnamed_files=_number(geo, "max_unnamed_files", source, zero_ok=True),

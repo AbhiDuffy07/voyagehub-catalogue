@@ -13,6 +13,7 @@ from tests.nearbyfixture import (
     build,
     fake_commons_api,
     fake_wikidata_api,
+    geo_on,
     sha,
 )
 
@@ -27,7 +28,7 @@ def world(client, tmp_path):
     with respx.mock:
         respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api())
         respx.get(COMMONS).mock(side_effect=fake_commons_api())
-        result = run_nearby(client, **folders, sleep=lambda s: None)
+        result = run_nearby(client, **folders, sleep=lambda s: None, rules=geo_on())
     return folders, result.output_dir
 
 

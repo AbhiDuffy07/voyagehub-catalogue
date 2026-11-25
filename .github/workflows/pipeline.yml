@@ -5,8 +5,8 @@ name: pipeline
 # starts it; there is no schedule here.
 #
 # The work is a chain of jobs that run one after another, never side by side: fetch (discover,
-# listings), enrich (Wikidata), summaries (Wikipedia), photos (Commons), nearby (extra places and
-# Commons geosearch for cities short of photographed places), then build (offline stages,
+# listings), enrich (Wikidata), summaries (Wikipedia), photos (Commons), nearby (extra places from
+# Wikidata for cities short of photographed places; Commons geosearch is off), then build (offline stages,
 # readiness, static site, deploy). Each network stage gets its own job so a world run does not have
 # to fit into one 6-hour job, and because the jobs run in sequence the request rate against the
 # Wikimedia APIs is never higher than in a single job (the program itself caps it at 3 requests at

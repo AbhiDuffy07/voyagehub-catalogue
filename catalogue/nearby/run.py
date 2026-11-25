@@ -105,8 +105,12 @@ class NearbyResult:
                 f"cities assessed: {t['cities']}; short of photographed places: "
                 f"{t['short_cities']}",
                 f"extra places: {t['extra_places']} in {t['cities_with_extra_places']} cities",
-                f"places searched on Commons: {t['subjects']}; given a photo candidate: "
-                f"{t['subjects_with_candidate']}",
+                (
+                    f"places searched on Commons: {t['subjects']}; given a photo candidate: "
+                    f"{t['subjects_with_candidate']}"
+                    if t["geosearch_enabled"]
+                    else "Commons geosearch: off"
+                ),
                 f"requests: {t['cache']['misses']} sent, {t['cache']['hits']} from the cache",
             ]
         )
@@ -341,9 +345,13 @@ def _report(totals: Mapping[str, Any], dump_date: str, rules: NearbyRules) -> st
             f"- extra places from Wikidata: {totals['extra_places']} in "
             f"{totals['cities_with_extra_places']} cities (radius {rules.places_radius_km:g} km, "
             f"at most {rules.max_per_city} per city)",
-            f"- places searched on Commons: {totals['subjects']} (radius "
-            f"{rules.search_radius_m} m, name-free band {rules.name_free_radius_m} m); given a "
-            f"photo candidate: {totals['subjects_with_candidate']}",
+            (
+                f"- places searched on Commons: {totals['subjects']} (radius "
+                f"{rules.search_radius_m} m, name-free band {rules.name_free_radius_m} m); given "
+                f"a photo candidate: {totals['subjects_with_candidate']}"
+                if rules.geosearch_enabled
+                else "- Commons geosearch: off (config/nearby.toml [geosearch] enabled)"
+            ),
             f"- candidate rows: {totals['candidate_rows']}",
             f"- searches skipped because the search service stayed too busy: "
             f"{totals['searches_busy']} (run again to fill them; the cache keeps the rest)",
@@ -605,7 +613,9 @@ def run_nearby(
             key = (p.page_id, p.ordinal)
             if key not in owners or key in photographed:
                 continue
-            if p.point is None:
+            if not rules.geosearch_enabled:
+                subjects_skipped["geosearch_off"] += 1
+            elif p.point is None:
                 subjects_skipped[point_status[key]] += 1
             elif key in shared:
                 subjects_skipped["coord_shared"] += 1
@@ -776,6 +786,7 @@ def run_nearby(
         "short_cities": len(short),
         "extra_places": len(place_rows),
         "cities_with_extra_places": len({r["owner_page_id"] for r in place_rows}),
+        "geosearch_enabled": rules.geosearch_enabled,
         "subjects": len(subjects),
         "subjects_with_candidate": with_candidate,
         "candidate_rows": len(candidate_rows),

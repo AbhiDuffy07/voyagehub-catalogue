@@ -10,11 +10,13 @@ photo), City Palace (photographed), Old Cafe (an eat listing, only a neighbour) 
 import hashlib
 import json
 import math
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import httpx
 
+from catalogue.nearby.rules import NearbyRules, load_nearby_rules
 from tests.apifakes import coordinate_claim, entity, item_claim, string_claim
 from tests.photofakes import COMMONS, _page, commons_file
 
@@ -23,6 +25,14 @@ TODAY = date(2026, 11, 23)
 M = 1 / 111_195  # about one metre of latitude, in degrees
 JAIPUR = (26.92, 75.82)
 AMER = (26.985, 75.851)
+
+
+def geo_on() -> NearbyRules:
+    """The committed rules with Commons geosearch switched on: the mechanism stays tested while
+    the committed rules keep it off (owner ruling 2026-11-25)."""
+    return replace(load_nearby_rules(), geosearch_enabled=True)
+
+
 SPRINGFIELD = (42.10, -72.59)
 HAWA = (26.9239, 75.8267)
 CITY_PALACE = (26.9258, 75.8237)

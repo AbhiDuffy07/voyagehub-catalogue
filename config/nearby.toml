@@ -5,9 +5,11 @@
 # file (the "short" line is config/readiness_rules.toml's min_photographed_places). Change a value
 # only together with its reason, and bump rules_version (rows carry it).
 
-rules_version = 2
+rules_version = 3
 
 [geosearch]
+# false: no Commons geosearch at all; only Wikidata extra places (step 1) add photographed places.
+enabled = false
 # Commons files within this many metres of a place's point are looked at (hard cap 150 m).
 search_radius_m = 100
 # Up to this distance a file may be accepted without its name naming the place, but only when it
@@ -34,7 +36,12 @@ it to 0. Version 2 (2026-11-24): the India sample (seed 20261123, rules version 
 of 40 wrong (17.5%): a crowd at an aarti and an information board came through the name-free band, \
 a river view matched only on the city name, and interiors or exhibits came through named files and \
 Wikidata images. So the band is 0 (a name match is always required), and the city's own name never \
-counts as a match (a code rule, not a value here)."""
+counts as a match (a code rule, not a value here). Version 3 (2026-11-25, owner ruling): the next \
+India sample (seed 20261125, rules version 2) still had 5 of 40 wrong (12.5%), and 4 of the 5 were \
+geosearch files (4 of 16): two information or road signs, a lobby display, an animal and another \
+shrine of the same complex, all with correctly named files, so no name rule can catch them. \
+Wikidata extra places had 1 of 24 wrong. So geosearch is off; the rules below stay for a later, \
+better check of what a file shows."""
 
 [places]
 # Wikidata items with a point within this many km of the city centre are looked at (the API caps

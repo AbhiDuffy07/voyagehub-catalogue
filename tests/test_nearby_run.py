@@ -14,6 +14,7 @@ from tests.nearbyfixture import (
     build,
     fake_commons_api,
     fake_wikidata_api,
+    geo_on,
     jsonl,
     listing,
     north,
@@ -29,6 +30,7 @@ def rows(path):
 def run(client, folders, wd_seen=None, cm_seen=None, **kwargs):
     respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api(wd_seen))
     respx.get(COMMONS).mock(side_effect=fake_commons_api(cm_seen))
+    kwargs.setdefault("rules", geo_on())
     return run_nearby(client, **folders, sleep=lambda s: None, **kwargs)
 
 
@@ -77,7 +79,7 @@ def test_items_that_are_not_new_visitor_places_are_skipped_and_counted(client, t
 def test_geosearch_finds_a_named_photo_and_skips_the_busy_point_and_the_small_file(
     client, tmp_path
 ):
-    band = replace(load_nearby_rules(), name_free_radius_m=40)
+    band = replace(geo_on(), name_free_radius_m=40)
     result = run(client, build(tmp_path), rules=band)
     candidates = rows(result.output_dir / "nearby_candidates.jsonl")
     geo = [c for c in candidates if c["sources"] == ["commons_geosearch"]]
@@ -144,7 +146,7 @@ def test_a_world_run_works_for_any_country(client, tmp_path):
 
 @respx.mock
 def test_name_match_always_required_when_the_name_free_band_is_zero(client, tmp_path):
-    strict = replace(load_nearby_rules(), name_free_radius_m=0)
+    strict = replace(geo_on(), name_free_radius_m=0)
     result = run(client, build(tmp_path), rules=strict)
     assert result.totals["geosearch_skipped"]["no_name_match"] == 4
     assert result.totals["geosearch_skipped"].get("busy_point", 0) == 0
@@ -259,7 +261,7 @@ def test_a_search_that_stays_busy_is_skipped_counted_and_not_cached(client, tmp_
     folders = build(tmp_path)
     respx.get(WIKIDATA).mock(side_effect=_busy_first(fake_wikidata_api(), 99, seen))
     respx.get(COMMONS).mock(side_effect=fake_commons_api())
-    result = run_nearby(client, **folders, sleep=lambda s: None)
+    result = run_nearby(client, **folders, sleep=lambda s: None, rules=geo_on())
     assert result.totals["extra_places"] == 0
     assert result.totals["searches_busy"] == 1
     assert result.totals["places_skipped"]["city_search_busy"] == 1
@@ -302,7 +304,7 @@ def test_the_city_name_in_a_place_name_is_no_name_match(client, tmp_path):
     }
     respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api())
     respx.get(COMMONS).mock(side_effect=fake_commons_api(files=files, near=near))
-    result = run_nearby(client, **folders, sleep=lambda s: None)
+    result = run_nearby(client, **folders, sleep=lambda s: None, rules=geo_on())
     gate_rows = [
         c
         for c in rows(result.output_dir / "nearby_candidates.jsonl")
@@ -330,3 +332,26 @@ def test_a_duplicate_listing_does_not_make_the_original_ambiguous(client, tmp_pa
     ]
     assert geo == ["Hawa Mahal16.jpg"]
     assert result.totals["geosearch_skipped"].get("ambiguous", 0) == 0
+
+
+def test_the_committed_rules_keep_commons_geosearch_off():
+    # Owner ruling (2026-11-25): with a name match always required, the India sample still had
+    # 5 of 40 wrong, 4 of them from geosearch. Extra places from Wikidata stay on.
+    assert load_nearby_rules().geosearch_enabled is False
+
+
+@respx.mock
+def test_with_geosearch_off_no_commons_search_runs_and_extra_places_still_come(client, tmp_path):
+    wd_seen, cm_seen = [], []
+    off = replace(geo_on(), geosearch_enabled=False)
+    result = run(client, build(tmp_path), wd_seen, cm_seen, rules=off)
+    assert not [p for p in cm_seen if p.get("list") == "geosearch"]
+    candidates = rows(result.output_dir / "nearby_candidates.jsonl")
+    assert not [c for c in candidates if "commons_geosearch" in c["sources"]]
+    assert sorted(c["commons_file"] for c in candidates) == ["Albert Hall.jpg", "Galta Ji.jpg"]
+    assert result.totals["subjects"] == 0
+    # Hawa Mahal and Jantar Mantar: every place without a photo is skipped for the same reason.
+    assert result.totals["subjects_skipped"] == {"geosearch_off": 2}
+    assert "Commons geosearch: off" in (result.output_dir / "report.md").read_text("utf-8")
+    assert "Commons geosearch: off" in result.summary()
+    assert "places searched on Commons" in run(client, build(tmp_path / "on")).summary()

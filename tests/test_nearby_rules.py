@@ -6,6 +6,7 @@ from catalogue.nearby.rules import MAX_SEARCH_RADIUS_M, load_nearby_rules
 GOOD = """
 rules_version = 3
 [geosearch]
+enabled = true
 search_radius_m = 100
 name_free_radius_m = 40
 max_unnamed_files = 3
@@ -44,6 +45,7 @@ def test_the_committed_rules_load():
 def test_a_good_file_loads_every_value(tmp_path):
     rules = load_nearby_rules(write(tmp_path, GOOD))
     assert rules.version == 3
+    assert rules.geosearch_enabled is True
     assert rules.search_radius_m == 100 and rules.name_free_radius_m == 40
     assert rules.max_unnamed_files == 3 and rules.ambiguity_margin_m == 50
     assert rules.max_photos_per_place == 3 and rules.geosearch_limit == 50
@@ -59,6 +61,11 @@ def test_name_free_radius_zero_is_allowed(tmp_path):
         write(tmp_path, GOOD.replace("name_free_radius_m = 40", "name_free_radius_m = 0"))
     )
     assert rules.name_free_radius_m == 0
+
+
+def test_geosearch_can_be_switched_off(tmp_path):
+    rules = load_nearby_rules(write(tmp_path, GOOD.replace("enabled = true", "enabled = false")))
+    assert rules.geosearch_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -77,6 +84,9 @@ def test_name_free_radius_zero_is_allowed(tmp_path):
         ("rules_version = 3", 'rules_version = "3"'),
         ('reason = "why"\n[places]', "[places]"),
         ("max_age_days = 30", "max_age_days = 0"),
+        ("enabled = true", 'enabled = "no"'),
+        ("enabled = true", "enabled = 1"),
+        ("enabled = true\n", ""),
     ],
 )
 def test_bad_values_are_refused_with_the_file_name(tmp_path, old, new):
