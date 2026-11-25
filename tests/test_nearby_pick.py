@@ -218,3 +218,14 @@ def test_the_centre_index_agrees_with_a_full_scan_everywhere():
         for _ in range(5):
             point = (centre[0] + rng.uniform(-0.07, 0.07), centre[1] + rng.uniform(-0.07, 0.07))
             assert index.nearest(point, 8.0, pid) == nearest_city(point, centres), (pid, point)
+
+
+def test_the_centre_index_agrees_with_a_full_scan_at_the_poles():
+    from catalogue.nearby.pick import CentreIndex
+
+    # Reviewer's case: a rival centre across the pole is nearer than the city's own centre.
+    own, rival, point = (-89.98, 60.0), (-89.98, -150.0), (-89.972, -119.876)
+    centres = {1: own, 2: rival}
+    assert CentreIndex(centres).nearest(point, 8.0, 1) == nearest_city(point, centres) == 2
+    north = {1: (89.95, 0.0), 2: (89.95, 179.0)}
+    assert CentreIndex(north).nearest((89.97, 120.0), 8.0, 1) == nearest_city((89.97, 120.0), north)

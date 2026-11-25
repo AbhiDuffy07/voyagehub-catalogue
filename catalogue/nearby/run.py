@@ -10,7 +10,8 @@ pass). For each short city, in this order:
    city's. Items that are Wikivoyage destinations, already a listing (same item, or the same name
    and place), or the same place as an earlier extra place are skipped. Prices and hours are never
    filled: an extra place has none, and flags say so.
-2. Every see/do listing of the city that has a trusted point but no photo is searched on Commons
+2. Only when `[geosearch] enabled` (off since rules version 3, owner ruling 2026-11-25): every
+   see/do listing of the city that has a trusted point but no photo is searched on Commons
    (GeoData, `[geosearch] search_radius_m`). Files that name the place, or unambiguous files very
    close to it, become photo candidates; see `pick.accept_hits`.
 

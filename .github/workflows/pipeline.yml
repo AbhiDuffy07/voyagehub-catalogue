@@ -252,7 +252,9 @@ jobs:
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
           python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"             --out-dir out/photo_selection_first
 
-      - name: Nearby places and Commons geosearch
+      # With country ALL this step probably passes the job's 345 minutes (about 48,000 requests,
+      # see README "World run and time"): run worlds country by country until nearby has a deadline.
+      - name: Nearby places from Wikidata
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
         run: |

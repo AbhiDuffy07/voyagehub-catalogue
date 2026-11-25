@@ -188,8 +188,8 @@ def _parser() -> argparse.ArgumentParser:
 
     nearby = commands.add_parser(
         "nearby",
-        help="more photographed places for short cities: Wikidata places and Commons geosearch "
-        "(network; reads a first photo-select pass)",
+        help="more photographed places for short cities: Wikidata places (Commons geosearch is "
+        "off in config/nearby.toml; network; reads a first photo-select pass)",
     )
     nearby.add_argument("--dump-date", required=True, help="dump directory date, like 20261101")
     nearby.add_argument("--country", help="only this ISO country code (same as photo-select)")

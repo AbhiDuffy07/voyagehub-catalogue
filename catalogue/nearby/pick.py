@@ -202,7 +202,9 @@ class CentreIndex:
         if radius > max_km:
             return nearest_city(point, self._centres)
         dlat = radius / 111.0 + self.CELL
-        top = min(89.9, abs(point[0]) + dlat)
+        top = abs(point[0]) + dlat
+        if top >= 89.9:  # the circle may wrap round the pole: no longitude box holds it
+            return nearest_city(point, self._centres)
         dlon = radius / (111.0 * math.cos(math.radians(top))) + self.CELL
         if dlon >= 90:
             return nearest_city(point, self._centres)
