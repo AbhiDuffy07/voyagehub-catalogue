@@ -1,15 +1,34 @@
 import pytest
 
 from catalogue.errors import PipelineError
+from catalogue.publish.hero import load_hero_rules
 from catalogue.readiness.rules import (
     CityFacts,
     CityState,
     assess_city,
     decide_publication,
     load_readiness_rules,
+    photo_counts,
 )
+from tests.readinessfixture import photo
 
 RULES = load_readiness_rules()
+
+
+def test_photo_counts_match_what_readiness_counted():
+    rows = [
+        photo("article", 1, hero=True),  # the city's own photo: a hero, never a place
+        photo("listing", 1, 2, hero=True),  # a place with a published hero-quality photo
+        photo("listing", 1, 3, bad_author=True),  # publish leaves it out: no place, no hero
+        photo("listing", 1, 4, has=False),  # no photo at all
+        photo("listing", 9, 1),  # a listing that is no place of any city
+    ]
+    owners = {(1, 2): 1, (1, 3): 1, (1, 4): 1}
+    counts = photo_counts(rows, owners, load_hero_rules())
+    assert counts.places == {1: 1}
+    assert counts.hero == {1: 2}
+    assert counts.counted == frozenset({(1, 2)})
+    assert counts.unowned == 1
 
 
 def facts(**kw):

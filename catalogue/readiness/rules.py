@@ -8,6 +8,7 @@ unpublished only after `unpublish_after_failed_runs` not-ready runs in a row.
 """
 
 import tomllib
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Any
 from catalogue.errors import PipelineError
 from catalogue.photos.select import _strings, _table
 from catalogue.prices.pricing import _whole
+from catalogue.publish.build import photo_of
+from catalogue.publish.hero import HeroRules, hero_problem
 
 READINESS_RULES_PATH = (
     Path(__file__).resolve().parent.parent.parent / "config" / "readiness_rules.toml"
@@ -132,3 +135,44 @@ def place_owners(
         for r in rows
         if r["kind"] in wanted and not r["duplicate_of"] and (r.get("name") or "").strip()
     }
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCounts:
+    places: Counter[int]  # photographed places per city
+    hero: Counter[int]  # hero photos per city (the city's own photo and its places' photos)
+    counted: frozenset[tuple[int, int]]  # the places counted in `places`
+    unowned: int  # place photos of listings that are no city's place
+
+
+def photo_counts(
+    rows: Iterable[Mapping[str, Any]],
+    owners: Mapping[tuple[int, int], int],
+    hero: HeroRules,
+) -> PhotoCounts:
+    """Photographed places and hero photos per city, with the very predicates publish-static uses:
+    a photo it would leave out (no credit, a bad author) is no photographed place, and a photo
+    that may not be a hero (size, rejection lists, collage name, author) is no hero. Readiness and
+    `nearby` both count with this, so they cannot disagree."""
+    places: Counter[int] = Counter()
+    heroes: Counter[int] = Counter()
+    counted: set[tuple[int, int]] = set()
+    unowned = 0
+    for r in rows:
+        if not r.get("photo"):
+            continue
+        row = dict(r)
+        is_article = row["subject"] == "article"
+        key = (row["page_id"], row["ordinal"])
+        owner = row["page_id"] if is_article else owners.get(key)
+        if owner is None:
+            unowned += 1  # a photo of a listing that is not a place (or has no name)
+            continue
+        published = photo_of(row, Counter(), hero) is not None
+        if not is_article:
+            if not published:
+                continue  # publish-static leaves it out, so it is no photographed place
+            places[owner] += 1
+            counted.add(key)
+        heroes[owner] += published and hero_problem(row, hero) is None
+    return PhotoCounts(places, heroes, frozenset(counted), unowned)

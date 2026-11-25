@@ -43,12 +43,10 @@ from catalogue.listings.run import parse_dump_date
 from catalogue.nearby.inputs import PLACES_FILE as NEARBY_PLACES_FILE
 from catalogue.nearby.inputs import extra_places, nearby_for
 from catalogue.photos.select import REJECTED_PATH
-from catalogue.publish.build import photo_of
 from catalogue.publish.hero import (
     CONTENT_PATH,
     HEROES_PATH,
     HeroRules,
-    hero_problem,
     load_hero_rules,
 )
 from catalogue.readiness.near_miss import near_miss_csv, near_miss_markdown, near_misses
@@ -60,6 +58,7 @@ from catalogue.readiness.rules import (
     assess_city,
     decide_publication,
     load_readiness_rules,
+    photo_counts,
     place_owners,
 )
 
@@ -365,30 +364,12 @@ def run_readiness(
     except (KeyError, TypeError):
         raise _damaged(f"{LISTINGS_FILE}, {SUMMARIES_FILE} or {TIMEZONES_FILE}") from None
 
-    hero: Counter[int] = Counter()
-    places: Counter[int] = Counter()
-    unowned_photos = 0
-    # The very predicates publish-static uses: a photo it would leave out (no credit, a bad author)
-    # is no photographed place, and a photo that may not be a hero (size, rejection lists, collage
-    # name, author) is no hero.
     photo_rules = hero_rules if hero_rules is not None else load_hero_rules()
     try:
-        for r in _rows(photos_folder / PHOTOS_FILE):
-            if not r.get("photo"):
-                continue
-            is_article = r["subject"] == "article"
-            owner = r["page_id"] if is_article else place_owner.get((r["page_id"], r["ordinal"]))
-            if owner is None:
-                unowned_photos += 1  # a photo of a listing that is not a place (or has no name)
-                continue
-            published = photo_of(r, Counter(), photo_rules) is not None
-            if not is_article:
-                if not published:
-                    continue  # publish-static leaves it out, so it is no photographed place
-                places[owner] += 1
-            hero[owner] += published and hero_problem(r, photo_rules) is None
+        counts = photo_counts(_rows(photos_folder / PHOTOS_FILE), place_owner, photo_rules)
     except (KeyError, TypeError):
         raise _damaged(PHOTOS_FILE) from None
+    hero, places, unowned_photos = counts.hero, counts.places, counts.unowned
 
     try:
         blocks = list(_rows(blocks_folder / BLOCKS_FILE))

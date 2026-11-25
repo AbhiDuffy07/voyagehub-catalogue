@@ -74,9 +74,13 @@ from catalogue.photos.run import INPUT_FILES, Candidate, Subject
 from catalogue.photos.run import _row as candidate_row
 from catalogue.photos.select import SelectionRules, load_selection_rules
 from catalogue.photos.select_run import PHOTO_FIELDS, _verify_photos
-from catalogue.publish.build import photo_of
 from catalogue.publish.hero import HeroRules, load_hero_rules
-from catalogue.readiness.rules import ReadinessRules, load_readiness_rules, place_owners
+from catalogue.readiness.rules import (
+    ReadinessRules,
+    load_readiness_rules,
+    photo_counts,
+    place_owners,
+)
 
 SCHEMA_VERSION = 1
 SELECTION_FILE = "photo_selection.jsonl"
@@ -133,25 +137,6 @@ class Place:
 
 
 # --- inputs -------------------------------------------------------------------------------------
-
-
-def photographed_places(
-    owners: Mapping[tuple[int, int], int],
-    selection_rows: Iterable[Mapping[str, Any]],
-    hero: HeroRules,
-) -> tuple[Counter, set[tuple[int, int]]]:
-    """Photographed places per city, exactly as readiness counts them, and the places counted."""
-    counts: Counter = Counter()
-    done: set[tuple[int, int]] = set()
-    for r in selection_rows:
-        if not r.get("photo") or r["subject"] == "article":
-            continue
-        key = (r["page_id"], r["ordinal"])
-        owner = owners.get(key)
-        if owner is not None and photo_of(dict(r), Counter(), hero) is not None:
-            counts[owner] += 1
-            done.add(key)
-    return counts, done
 
 
 def _listing_point(
@@ -441,9 +426,8 @@ def run_nearby(
         }
         listings = list(_rows(listings_folder / LISTINGS_FILE))
         owners = place_owners(listings, readiness.place_sections)
-        counts, photographed = photographed_places(
-            owners, _rows(selection_folder / SELECTION_FILE), hero
-        )
+        pass_one = photo_counts(_rows(selection_folder / SELECTION_FILE), owners, hero)
+        counts, photographed = pass_one.places, pass_one.counted
         used_files = {
             str(r["photo"]["commons_file"])
             for r in _rows(selection_folder / SELECTION_FILE)
