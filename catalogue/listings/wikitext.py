@@ -83,6 +83,17 @@ _INVISIBLE_TAGS = frozenset({"ref", "gallery", "references", "imagemap", "noincl
 _REMOVED_LINK_PREFIXES = ("category:", "file:", "image:", "media:")
 _NOT_ALNUM = re.compile(r"[^a-z0-9]+")
 _BLANK_RUNS = re.compile(r"\n{3,}")
+# Measure templates written out as "40 km", "35°C" (the unit after the first value).
+_UNIT_TEMPLATES = {
+    "km": "km",
+    "mi": "mi",
+    "m": "m",
+    "ft": "ft",
+    "km2": "km²",
+    "mi2": "mi²",
+    "c": "°C",
+    "f": "°F",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,9 +194,56 @@ def _heading_text(heading: Heading) -> str:
     return " ".join(heading.title.strip_code().split())
 
 
+def _positional(template: Template, index: int) -> str:
+    return str(template.get(index).value).strip() if template.has(index) else ""
+
+
+def _inline_text(template: Template, code: Wikicode) -> str | None:
+    """What an inline template reads as in running text, or None to drop it (as strip_code does).
+    A listing or marker reads as its name when it sits in a sentence ("run by {{listing|name=X}}
+    since 1947"); alone on its line it is a listing entry and stays out of the prose."""
+    name = _template_name(template)
+    first = _positional(template, 1)
+    if name in KINDS or name == "marker":
+        listed = str(template.get("name").value).strip() if template.has("name") else ""
+        return listed if listed and _in_a_sentence(template, code) else None
+    if name in _UNIT_TEMPLATES and first:
+        unit = _UNIT_TEMPLATES[name]
+        return f"{first}{unit}" if unit.startswith("°") else f"{first} {unit}"
+    if name == "convert" and first:
+        return f"{first} {_positional(template, 2)}".strip()
+    if name in ("station", "phone", "tollfree") and first:
+        return first
+    if name == "isbn" and first:
+        return f"ISBN {first}"
+    return None
+
+
+def _in_a_sentence(template: Template, code: Wikicode) -> bool:
+    """True when the template's line has other words around it (bullets and spaces aside)."""
+    text = str(code)
+    at = text.find(str(template))
+    if at < 0:
+        return False
+    start = text.rfind("\n", 0, at) + 1
+    end = text.find("\n", at + len(str(template)))
+    end = len(text) if end < 0 else end
+    around = text[start:at] + " " + text[at + len(str(template)) : end]
+    return bool(mwparserfromhell.parse(around).strip_code().strip(" \t*#:;"))
+
+
 def _plain_text(code: Wikicode) -> str:
     """Plain text: links reduced to their text, listings and other templates gone, references,
-    categories and files removed. Bullets become lines and sub-headings stay as lines."""
+    categories and files removed. Bullets become lines and a sub-heading becomes a paragraph of
+    its own. Inline templates that carry words (a listing named in a sentence, {{km|40}},
+    {{station|X}}) are written out first, so a sentence never loses a word."""
+    for template in code.filter_templates():
+        if code.contains(template):  # a template inside a replaced or dropped one is gone
+            replacement = _inline_text(template, code)
+            if replacement is not None:
+                code.replace(template, replacement)
+    for heading in code.filter_headings():
+        code.replace(heading, f"\n\n{_heading_text(heading)}\n\n")
     for tag in [t for t in code.filter_tags() if str(t.tag).strip().lower() in _INVISIBLE_TAGS]:
         if code.contains(tag):  # a tag nested in a removed tag is already gone
             code.remove(tag)
@@ -198,7 +256,7 @@ def _plain_text(code: Wikicode) -> str:
         if code.contains(link):
             code.remove(link)
     stripped = code.strip_code(normalize=True, collapse=True)
-    lines = [line.strip() for line in stripped.splitlines()]
+    lines = [" ".join(line.split()) for line in stripped.splitlines()]  # a dropped template's gap
     return _BLANK_RUNS.sub("\n\n", "\n".join(lines)).strip()
 
 

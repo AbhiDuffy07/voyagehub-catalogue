@@ -15,6 +15,7 @@ from catalogue.publish.hero import CONTENT_PATH
 RIDE_APPS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "ride_apps.toml"
 MARKUP = re.compile(r"\[\[|\]\]|\{\{|\}\}|<[^>]*>|''")
 SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+PARAGRAPH_END = re.compile(r"[.!?][\"'”’)]*$")
 SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 COVERAGE = ("cities", "nationwide", "unknown")
 
@@ -129,11 +130,21 @@ def _cut(paragraph: str, limit: int) -> str:
     return head[: head.rfind(" ")].rstrip(" ,;:") + "…" if " " in head else head + "…"
 
 
+def _complete(paragraph: str) -> str:
+    """A paragraph that has a sentence end but trails off after it keeps its complete sentences
+    (a cut-off or vandalised tail, like "... by AMTS.UTTAR PRADESH"). Without any sentence end it
+    is left as it is, for the length rule to judge."""
+    if PARAGRAPH_END.search(paragraph):
+        return paragraph
+    ends = [m.end() for m in SENTENCE_END.finditer(paragraph)]
+    return paragraph[: ends[-1]] if ends else paragraph
+
+
 def excerpt_of(text: str, rules: ContentRules) -> str | None:
     """Whole paragraphs from the start of a section, up to the limit; None when nothing usable."""
     usable = [
         p
-        for p in _paragraphs(text)
+        for p in map(_complete, _paragraphs(text))
         if not MARKUP.search(p)
         and (len(p) >= rules.min_paragraph_chars or p.endswith((".", "!", "?")))
     ]

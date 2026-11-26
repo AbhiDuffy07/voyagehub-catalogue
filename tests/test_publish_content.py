@@ -3,6 +3,7 @@ and the getting_around field."""
 
 import json
 
+from catalogue.listings.wikitext import parse_page
 from catalogue.publish import build as b
 from catalogue.publish.getting_around import excerpt_of, load_content_rules, load_ride_apps
 from catalogue.publish.hero import hero_problem, load_hero_rules
@@ -298,3 +299,39 @@ def test_a_damaged_section_row_gives_no_excerpt_instead_of_a_crash():
     around = b.build_city(CITY, up)["getting_around"]
     assert around["excerpt"] is None
     assert up.counts["getting_around_left_out_no_credit"] == 1
+
+
+# Real wikitext, Ahmedabad "Get around" (dump 20261101, revision 5389230), first paragraphs. The
+# stray "UTTAR PRADESH" is in the article itself.
+AHMEDABAD_GET_AROUND = """== Get around ==
+[[Image:Ahmedabad City Tourist Map.png|thumb|right|Tourist Map of Ahmedabad]]
+The services of AMTS and BRTS run from 6AM to 11PM.
+
+===By AMTS city bus===
+The local city buses are run by {{listing| name=Ahmedabad Municipal Transport Service | alt=AMTS \
+| wikipedia=Ahmedabad Municipal Transport Service | content= | wikidata=Q4696119 }} since 1947, \
+forming a wide network covering almost all the points of Ahmedabad. Any destination in the city \
+can be reached from anywhere in the city by AMTS.UTTAR PRADESH
+[[File:Ahmedabad AMTS Bus.JPG|thumbnail|300px|Older buses of AMTS]]
+"""
+
+
+def test_ahmedabad_excerpt_reads_cleanly_from_the_real_wikitext():
+    (section,) = parse_page(AHMEDABAD_GET_AROUND).sections
+    assert excerpt_of(section.text, load_content_rules()) == (
+        "The services of AMTS and BRTS run from 6AM to 11PM.\n\n"
+        "The local city buses are run by Ahmedabad Municipal Transport Service since 1947, "
+        "forming a wide network covering almost all the points of Ahmedabad."
+    )
+
+
+def test_a_paragraph_keeps_only_its_complete_sentences():
+    rules = load_content_rules()
+    text = "Buses are cheap and run often across town. Any stop works for AMTS.UTTAR PRADESH"
+    assert excerpt_of(text, rules) == "Buses are cheap and run often across town."
+
+
+def test_a_paragraph_without_any_sentence_end_is_still_judged_by_its_length():
+    rules = load_content_rules()
+    text = "Autos and app cabs are everywhere in the city centre and near stations"
+    assert excerpt_of(text, rules) == text

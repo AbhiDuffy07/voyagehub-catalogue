@@ -18,7 +18,11 @@ max_author_chars = 100
 # The excerpt of the Wikivoyage "Get around" section: whole paragraphs from the start, at most
 # max_chars characters (a longer first paragraph is cut at its last sentence end, or at a word
 # with an ellipsis). A paragraph shorter than min_paragraph_chars without a sentence end is a
-# heading or list stub and is skipped; a paragraph with wiki markup left in it is skipped.
+# heading or list stub and is skipped; a paragraph with wiki markup left in it is skipped. A
+# paragraph that trails off after its last sentence end keeps its complete sentences only (the
+# Ahmedabad article ends one with "by AMTS.UTTAR PRADESH"). fetch-listings writes inline templates
+# out in the section text (a listing named in a sentence, {{km|40}}, {{station|X}}) and makes
+# each sub-heading a paragraph of its own.
 max_chars = 400
 min_paragraph_chars = 40
 
