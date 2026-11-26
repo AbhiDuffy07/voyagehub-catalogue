@@ -232,32 +232,52 @@ def _hit_point(hit: Mapping[str, Any]) -> tuple[float, float] | None:
 def _fetch_entities(
     cache: ApiCache, client: PoliteClient, qids: Iterable[str]
 ) -> dict[str, ItemFacts]:
-    wanted = sorted(set(qids), key=lambda q: int(q[1:]))
-    batches = [wanted[i : i + ENTITY_BATCH] for i in range(0, len(wanted), ENTITY_BATCH)]
-    items: dict[str, ItemFacts] = {}
+    """Each item is cached under its own one-item question, so an item read once is never asked
+    again, whichever cities shared its batch (chunks change that between runs); only the items
+    not in the cache are asked for, in batches."""
+    base = {
+        "action": "wbgetentities",
+        "props": "claims|sitelinks|labels",
+        "languages": "en",
+        "sitefilter": "enwiki",
+    }
+
+    def one(qid: str) -> dict[str, str]:
+        return {**base, "ids": qid}
+
+    entities: dict[str, Any] = {}
+    unread: list[str] = []
+    for qid in sorted(set(qids), key=lambda q: int(q[1:])):
+        stored = cache.lookup(WIKIDATA_API, one(qid))
+        found = stored.get("entities") if stored else None
+        entity = found.get(qid) if isinstance(found, dict) else None
+        if isinstance(entity, dict):  # a damaged entry is read again
+            entities[qid] = entity
+        else:
+            unread.append(qid)
+    batches = [unread[i : i + ENTITY_BATCH] for i in range(0, len(unread), ENTITY_BATCH)]
 
     def read(batch: list[str]) -> dict[str, Any]:
-        return cache.get(
-            client,
-            WIKIDATA_API,
-            {
-                "action": "wbgetentities",
-                "ids": "|".join(batch),
-                "props": "claims|sitelinks|labels",
-                "languages": "en",
-                "sitefilter": "enwiki",
-            },
-        )
+        return cache.fetch(client, WIKIDATA_API, {**base, "ids": "|".join(batch)})
 
     for batch, reply in _run_bounded(batches, read, "Wikidata items near cities"):
-        entities = reply.get("entities")
-        if not isinstance(entities, dict) or not set(batch) <= set(entities):
+        answered = reply.get("entities")
+        if not isinstance(answered, dict) or not all(
+            isinstance(answered.get(q), dict) for q in batch
+        ):
             raise PipelineError("Wikidata's reply did not include every requested item")
         for requested in batch:
-            entity = entities[requested]
-            # A merged item answers under its new ID; it is used only under the ID it really has.
-            if "missing" not in entity and entity.get("id", requested) == requested:
-                items[requested] = parse_item(requested, entity)
+            entities[requested] = answered[requested]
+            cache.store(
+                WIKIDATA_API, one(requested), {"entities": {requested: answered[requested]}}
+            )
+
+    items: dict[str, ItemFacts] = {}
+    for requested in sorted(entities, key=lambda q: int(q[1:])):
+        entity = entities[requested]
+        # A merged item answers under its new ID; it is used only under the ID it really has.
+        if "missing" not in entity and entity.get("id", requested) == requested:
+            items[requested] = parse_item(requested, entity)
     return items
 
 

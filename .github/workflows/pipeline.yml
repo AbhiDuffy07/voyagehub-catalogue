@@ -253,6 +253,11 @@ jobs:
         id: nearby-rules
         run: echo "version=$(python -c 'from catalogue.nearby.rules import load_nearby_rules; print(load_nearby_rules().version)')" >> "$GITHUB_OUTPUT"
 
+      # Sizes only: a world cache is about 10 GB unpacked (estimate), so the first world runs
+      # measure whether the runner's disk holds it.
+      - name: Disk before the cache
+        run: df -h / out
+
       # The API cache carries over between runs, so a run that stopped at its time budget is
       # continued by the next. Entries are immutable, so each run saves a new one (run id in the
       # key) and restores the newest for the same dump date and rules. No country in the key:
@@ -281,6 +286,12 @@ jobs:
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
           python -m catalogue nearby --dump-date "$DUMP_DATE" "${args[@]}" --started-at "$JOB_STARTED"
           echo "stage seconds: $SECONDS"
+
+      - name: Disk after nearby
+        if: always()
+        run: |
+          df -h / out
+          du -sh out/cache || true
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()

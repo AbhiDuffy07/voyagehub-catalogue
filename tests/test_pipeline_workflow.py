@@ -141,6 +141,16 @@ def test_nearby_restores_and_saves_its_cache_with_a_dump_and_rules_key():
     assert nearby.index("id: nearby-rules") < nearby.index(restore) < run_at < nearby.index(save)
 
 
+def test_nearby_logs_free_disk_around_the_cache_so_a_world_size_cache_is_measured():
+    nearby = job_blocks()["nearby"]
+    restore = nearby.index("actions/cache/restore@")
+    save = nearby.index("actions/cache/save@")
+    disk = [m.start() for m in re.finditer(r"df -h / out", nearby)]
+    assert len(disk) == 2
+    assert disk[0] < restore and nearby.index("python -m catalogue nearby ") < disk[1] < save
+    assert "du -sh out/cache" in nearby
+
+
 def test_nearby_gets_the_job_start_time():
     nearby = job_blocks()["nearby"]
     started = nearby.index('echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"')

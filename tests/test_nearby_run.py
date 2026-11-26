@@ -361,6 +361,35 @@ def test_with_geosearch_off_no_commons_search_runs_and_extra_places_still_come(c
     assert "places searched on Commons" in run(client, build(tmp_path / "on")).summary()
 
 
+# --- Wikidata items are cached one by one --------------------------------------------------------
+
+
+@respx.mock
+def test_items_already_read_are_never_asked_again_whatever_batch_they_were_in(client, tmp_path):
+    # Chunks change which items share a batch; an item read once must come from the cache.
+    from datetime import date
+
+    from catalogue.nearby.cache import ApiCache
+    from catalogue.nearby.run import _fetch_entities
+    from tests.nearbyfixture import ITEMS
+
+    first, second, *more = sorted(ITEMS, key=lambda q: int(q[1:]))
+    seen = []
+    respx.get(WIKIDATA).mock(side_effect=fake_wikidata_api(seen))
+    cache = ApiCache(tmp_path / "cache", date(2026, 11, 26), 30)
+    items = _fetch_entities(cache, client, [first, second])
+    assert set(items) == {first, second} and len(seen) == 1
+
+    again = _fetch_entities(cache, client, [second, first, *more, "Q999999999"])
+    assert [p["ids"] for p in seen[1:]] == ["|".join([*more, "Q999999999"])]
+    assert set(again) == {first, second, *more}  # the missing item is not parsed
+    assert again[first] == items[first]
+
+    seen.clear()
+    _fetch_entities(cache, client, ["Q999999999", first])  # a missing item is cached too
+    assert seen == []
+
+
 # --- time budget (world-safe nearby) ------------------------------------------------------------
 
 JAIPUR_SEARCH = "26.920000|75.820000"
