@@ -22,6 +22,9 @@ class NearbyFolder:
     places_sha256: str
     candidates_sha256: str
     photo_candidates_manifest_sha256: str
+    # Short cities nearby did not start before its time budget ran out. A manifest from before
+    # the list existed means every city was reached.
+    cities_not_reached: frozenset[int] = frozenset()
 
 
 def verify_nearby(folder: Path, country_filter: str | None) -> NearbyFolder:
@@ -37,8 +40,13 @@ def verify_nearby(folder: Path, country_filter: str | None) -> NearbyFolder:
         upstream = manifest["photo_candidates_manifest_sha256"]
         places_recorded = outputs[PLACES_FILE]
         candidates_recorded = outputs[CANDIDATES_FILE]
-    except (OSError, ValueError, KeyError, TypeError):
+        not_reached = manifest.get("cities_not_reached", [])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         raise PipelineError(damaged) from None
+    if not isinstance(not_reached, list) or not all(
+        isinstance(pid, int) and not isinstance(pid, bool) for pid in not_reached
+    ):
+        raise PipelineError(damaged)
     if recorded_country != country_filter:
         raise PipelineError("nearby was run for a different country filter; use the same --country")
     hashes: dict[str, str] = {}
@@ -55,6 +63,7 @@ def verify_nearby(folder: Path, country_filter: str | None) -> NearbyFolder:
         hashes[PLACES_FILE],
         hashes[CANDIDATES_FILE],
         str(upstream),
+        frozenset(not_reached),
     )
 
 

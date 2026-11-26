@@ -106,11 +106,20 @@ class CityState:
 
 
 def decide_publication(
-    previous: CityState | None, *, ready: bool, rules: ReadinessRules, has_slug: bool = True
+    previous: CityState | None,
+    *,
+    ready: bool,
+    rules: ReadinessRules,
+    has_slug: bool = True,
+    not_reached: bool = False,
 ) -> tuple[CityState, str]:
     """The city's new state and what happened: publish, keep, keep_pending_unpublish, unpublish,
     blocked_no_slug (ready, but the static page needs a slug and slugs are assigned only in a
-    reviewed discover wave) or none."""
+    reviewed discover wave), keep_not_reached or none.
+
+    `not_reached`: nearby ran out of time before this city, and only rules nearby could have fixed
+    are failing. A published city then keeps its state exactly (the failed-run count is neither
+    raised nor reset), because this run says nothing new about it."""
     was_published = previous is not None and previous.published
     if ready:
         if not was_published and not has_slug:
@@ -118,6 +127,8 @@ def decide_publication(
         return CityState(True, 0), ("keep" if was_published else "publish")
     if not was_published:
         return CityState(False, 0), "none"
+    if not_reached and previous is not None:
+        return CityState(True, previous.failed_runs), "keep_not_reached"
     failed = previous.failed_runs + 1 if previous is not None else 1
     if failed >= rules.unpublish_after_failed_runs:
         return CityState(False, failed), "unpublish"

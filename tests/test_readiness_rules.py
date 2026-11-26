@@ -113,6 +113,31 @@ def test_an_unpublished_city_that_becomes_ready_publishes_again():
     assert (state, action) == (CityState(True, 0), "publish")
 
 
+def test_a_published_city_not_reached_by_nearby_keeps_its_state():
+    state, action = decide_publication(
+        CityState(True, 1), ready=False, rules=RULES, not_reached=True
+    )
+    assert (state, action) == (CityState(True, 1), "keep_not_reached")
+
+
+def test_an_unpublished_city_not_reached_stays_unpublished():
+    state, action = decide_publication(
+        CityState(False, 2), ready=False, rules=RULES, not_reached=True
+    )
+    assert (state, action) == (CityState(False, 0), "none")
+    assert decide_publication(None, ready=False, rules=RULES, not_reached=True) == (
+        CityState(False, 0),
+        "none",
+    )
+
+
+def test_a_ready_city_not_reached_publishes_as_usual():
+    state, action = decide_publication(
+        CityState(True, 1), ready=True, rules=RULES, not_reached=True
+    )
+    assert (state, action) == (CityState(True, 0), "keep")
+
+
 def test_a_ready_city_with_no_slug_is_never_published_and_says_why():
     state, action = decide_publication(None, ready=True, rules=RULES, has_slug=False)
     assert (state, action) == (CityState(False, 0), "blocked_no_slug")
