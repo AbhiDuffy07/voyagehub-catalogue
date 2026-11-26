@@ -21,3 +21,15 @@ max_author_chars = 100
 # heading or list stub and is skipped; a paragraph with wiki markup left in it is skipped.
 max_chars = 400
 min_paragraph_chars = 40
+
+[summary]
+# The Wikipedia summary as shown (the stored one is never changed): bracketed asides removed
+# (pronunciations, IPA, "Hindi: ...", unit conversions, "(as of 2024)"), then the first
+# min_sentences sentences, plus more up to max_sentences while the text stays within max_chars.
+# Why: the app showed the whole first paragraph with IPA, e.g. Ahmedabad "( AH-mə-də-ba(h)d,
+# Hindustani: [ɛʱ(ɛ).m(ə).d̪ɑː.bɑːd̪])". A median lead is about 550 characters (summary_rules.toml);
+# 450 fits two or three ordinary sentences on a phone card. Removing text is a change to a
+# CC BY-SA work, so the attribution then says "(excerpt, adapted)".
+min_sentences = 2
+max_sentences = 3
+max_chars = 450

@@ -18,6 +18,12 @@ from catalogue.publish.getting_around import (
 )
 from catalogue.publish.hero import HeroRules, author_problem, hero_problem, load_hero_rules
 from catalogue.publish.models import SCHEMA_VERSION
+from catalogue.publish.summary_text import (
+    SummaryRules,
+    adapted_attribution,
+    display_summary,
+    load_summary_rules,
+)
 
 COST_FIELDS = (
     "basis",
@@ -62,6 +68,7 @@ class Upstream:
     ride_apps: dict[str, dict[str, Any]] = field(default_factory=load_ride_apps)
     hero_rules: HeroRules = field(default_factory=load_hero_rules)
     content_rules: ContentRules = field(default_factory=load_content_rules)
+    summary_rules: SummaryRules = field(default_factory=load_summary_rules)
 
 
 def _https(*urls: Any) -> bool:
@@ -110,21 +117,26 @@ def photo_of(
     }
 
 
-def text_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | None:
+def text_of(
+    row: dict[str, Any] | None, counts: Counter, rules: SummaryRules
+) -> dict[str, Any] | None:
+    """The published summary: the display text (brackets out, two or three sentences) with the
+    stored credit, marked "adapted" when text was taken out. The stored row is not changed."""
     if not row or not row.get("summary"):
         return None
     source = row.get("permalink") or row.get("url")
     if not (row.get("licence") and row.get("attribution") and _https(source)):
         counts["summaries_left_out_no_credit"] += 1
         return None
+    shown = display_summary(row["summary"], rules)
     return {
-        "text": row["summary"],
+        "text": shown,
         "credit": {
             "author": "Wikipedia contributors",
             "licence": row["licence"],
             "licence_url": row.get("licence_url") or None,
             "source_url": source,
-            "attribution": row["attribution"],
+            "attribution": adapted_attribution(row["attribution"], row["summary"], shown),
             "history_url": row.get("history_url") or None,
         },
     }
@@ -151,7 +163,7 @@ def _place(listing: dict[str, Any], up: Upstream, is_stop: bool) -> dict[str, An
         "kind": listing.get("kind"),
         "lat": point[0] if point else None,
         "long": point[1] if point else None,
-        "summary": text_of(up.summaries.get(key), up.counts),
+        "summary": text_of(up.summaries.get(key), up.counts, up.summary_rules),
         "photo": photo,
     }
 
@@ -291,7 +303,7 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         "title": row["title"],
         "country_iso": row.get("country_iso"),
         "tier": row["tier"],
-        "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts),
+        "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts, up.summary_rules),
         "hero": hero,
         "timezone": {"name": zone["timezone"], "basis": zone.get("timezone_basis")}
         if zone and zone.get("timezone")
