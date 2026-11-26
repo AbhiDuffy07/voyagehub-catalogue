@@ -76,7 +76,7 @@ def test_blocks_carry_stops_and_cost_with_basis(tmp_path):
     assert city["days"][0]["block_ids"] == ["jaipur-full"]
     (band,) = city["price_bands"]
     assert band["label"] == "approximate"
-    assert band["basis"] == "all"
+    assert band["basis"] == "all" and band["n_free"] == 2
 
 
 def test_index_lists_cities_with_hero_and_tier(tmp_path):

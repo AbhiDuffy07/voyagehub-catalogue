@@ -38,6 +38,7 @@ BAND_FIELDS = (
     "label",
     "n_prices",
     "n_fresh",
+    "n_free",
 )
 
 

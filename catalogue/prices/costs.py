@@ -1,7 +1,8 @@
 """Cost estimates (B11, the pure part): what a day block and a day cost, for each visitor group.
 
-For each stop the fee is, in this order: the stop's exact (fresh) price for the group, else the
-city's approximate band for the stop's kind, else unknown. An unknown fee is counted, never added
+For each stop the fee is, in this order: the stop's exact (fresh) price for the group, else zero
+when its older listing says free, else the city's approximate band for the stop's kind, else
+unknown. An unknown fee is counted, never added
 as zero. Food is one meal per half-day block (two for a full-day block) at the city's eat band,
 only where that band exists. Local transport is never included: there is no fare data. Everything
 is labelled `estimate` and carries a `basis` that says where each part came from. Amounts stay in
@@ -28,6 +29,11 @@ def _exact_tier(price: ListingPrice, group: str, currency: str) -> tuple[int, in
     return price.tiers.get(group) or price.tiers.get("adult")
 
 
+def _figures(band: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A band that only counts free prices has no figures: for an estimate it is no band."""
+    return band if band is not None and band.get("median_minor") is not None else None
+
+
 def _group_estimate(
     block: dict[str, Any],
     stops: list[dict[str, Any]],
@@ -37,7 +43,7 @@ def _group_estimate(
     rules: PriceRules,
     group: str,
 ) -> dict[str, Any]:
-    exact, approx, unknown = _empty(), _empty(), 0
+    exact, approx, unknown, listed_free = _empty(), _empty(), 0, 0
     city = block["owner_page_id"]
     band_use: dict[str, list[Any]] = {}
     edit_years: list[str] = []
@@ -59,10 +65,16 @@ def _group_estimate(
             if price.lastedit_date:
                 edit_years.append(price.lastedit_date)
             continue
+        if price.currency is None and price.band_values and not any(price.band_values.values()):
+            # Listed as free, but not recently: an approximate zero, not the city's paid band.
+            approx["stops"] += 1
+            stop_basis.append("listed_free")
+            listed_free += 1
+            continue
         # A stop whose listing says nothing about a price is unknown, not given the city's band.
         band = None
         if currency is not None and price.status != "none":
-            band = bands.get((city, price.kind, currency, group))
+            band = _figures(bands.get((city, price.kind, currency, group)))
         if band is None:
             unknown += 1
             stop_basis.append("unknown")
@@ -73,7 +85,7 @@ def _group_estimate(
         stop_basis.append("city_band")
         band_use.setdefault(price.kind, [band, 0])[1] += 1
     food = None
-    eat = bands.get((city, "eat", currency, group)) if currency else None
+    eat = _figures(bands.get((city, "eat", currency, group))) if currency else None
     meals = rules.meals_full_day if block["slot"] == "full_day" else rules.meals_half_day
     if eat is not None and meals:
         food = {
@@ -93,6 +105,8 @@ def _group_estimate(
         basis.append(f"{exact['stops']} stop(s) with an exact price (edited {span})")
     for kind, (band, count) in sorted(band_use.items()):
         basis.append(f"{count} stop(s) at the {kind} city band (n={band['n_prices']})")
+    if listed_free:
+        basis.append(f"{listed_free} stop(s) listed as free (not recently checked)")
     if food:
         basis.append(f"food: {food['meals']} meal(s) at the eat band (n={food['n_prices']})")
     if unknown:

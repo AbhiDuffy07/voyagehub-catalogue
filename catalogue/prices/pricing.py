@@ -3,10 +3,11 @@
 A listing price is `exact` only when its text was fully read and its listing was last edited within
 two years of the dump; then it keeps its visitor tiers (`resident`, `foreigner`, `adult`). Any other
 price never shows as a figure. It may still feed a city band: the band is the median of the
-amounts of one city, kind, currency and visitor group (the group's own tier, else the adult or
-untiered amount), with the 25th to 75th percentile as its range, from the fresh prices alone when
-there are enough of them. Nothing is converted
-between currencies, filled in, or guessed; a city with too few prices gets no band.
+paid amounts of one city, kind, currency and visitor group (the group's own tier, else the
+adult or untiered amount), with the 25th to 75th percentile (nearest rank) as its range, from the
+fresh prices alone when there are enough of them. Free prices are counted beside the range, never
+mixed into it. Nothing is converted between currencies, filled in, or guessed; a city with too few
+prices gets no band, and one with too few paid prices gets the counts with no figures.
 """
 
 import tomllib
@@ -181,40 +182,55 @@ def classify_listing(row: dict[str, Any], dump_day: date, rules: PriceRules) -> 
 
 
 def _percentile(values: list[int], percent: int) -> int:
-    """Linear interpolation between the closest ranks of a sorted list, in whole minor units."""
-    position = (len(values) - 1) * percent / 100
-    below = int(position)
-    above = min(below + 1, len(values) - 1)
-    return round(values[below] + (values[above] - values[below]) * (position - below))
+    """Nearest rank: the value at rank ceil(percent/100 * n) of a sorted list, so every figure is
+    an amount some listing gave (interpolating between a free listing and Rs 10 made Rs 2.50)."""
+    rank = -(-percent * len(values) // 100)
+    return values[min(max(rank, 1), len(values)) - 1]
 
 
 def build_bands(
-    prices: list[ListingPrice], rules: PriceRules
+    prices: list[ListingPrice],
+    rules: PriceRules,
+    city_currency: dict[int, str | None] | None = None,
 ) -> dict[tuple[int, str, str, str], dict[str, Any]]:
-    """Bands keyed by (city page id, kind, currency, visitor group). A free price has no currency
-    and counts as zero in every band of its city, kind and group; a city with only free prices gets
-    no band."""
+    """Bands keyed by (city page id, kind, currency, visitor group).
+
+    The range is built from paid prices alone; free prices are only counted (`n_free`), so a city
+    of mostly free sights does not show a range of a few paise. Figures need `min_prices` paid
+    prices; a band row needs that many prices paid and free together, and otherwise says how many
+    of them are free with null figures. A free price has no currency: it is counted in every band
+    of its city, kind and group, and a city with free prices only takes its country's currency
+    from `city_currency` (no row when that is unknown)."""
     paid: dict[tuple[int, str, str, str], list[tuple[ListingPrice, int]]] = defaultdict(list)
-    free: dict[tuple[int, str, str], list[tuple[ListingPrice, int]]] = defaultdict(list)
+    free: dict[tuple[int, str, str], list[ListingPrice]] = defaultdict(list)
     for price in prices:
         if price.kind not in rules.band_kinds:
             continue
         for group, value in price.band_values.items():
             if price.currency is None:
-                free[(price.owner_page_id, price.kind, group)].append((price, value))
+                free[(price.owner_page_id, price.kind, group)].append(price)
             else:
                 key = (price.owner_page_id, price.kind, price.currency, group)
                 paid[key].append((price, value))
+    keys = set(paid)
+    with_paid = {(k[0], k[1], k[3]) for k in paid}
+    for city, kind, group in free:
+        currency = (city_currency or {}).get(city)
+        if (city, kind, group) not in with_paid and currency:
+            keys.add((city, kind, currency, group))
     bands: dict[tuple[int, str, str, str], dict[str, Any]] = {}
-    for key, found in paid.items():
-        found = found + free.get((key[0], key[1], key[3]), [])
+    for key in keys:
+        found = paid.get(key, [])
+        frees = free.get((key[0], key[1], key[3]), [])
+        if len(found) + len(frees) < rules.min_prices:
+            continue
         fresh = [item for item in found if item[0].age == _FRESH_AGE]
         pool, basis = (fresh, "fresh") if len(fresh) >= rules.min_prices else (found, "all")
-        if len(pool) < rules.min_prices:
-            continue
+        figures = len(pool) >= rules.min_prices
         values = sorted(value for _, value in pool)
-        dates = sorted(p.lastedit_date for p, _ in pool if p.lastedit_date)
-        ages = [p.age for p, _ in found]
+        dated = [p for p, _ in pool] if figures else [p for p, _ in found] + frees
+        dates = sorted(p.lastedit_date for p in dated if p.lastedit_date)
+        ages = [p.age for p, _ in found] + [p.age for p in frees]
         bands[key] = {
             "owner_page_id": key[0],
             "kind": key[1],
@@ -222,10 +238,11 @@ def build_bands(
             "group": key[3],
             "label": "approximate",
             "basis": basis,
-            "median_minor": _percentile(values, 50),
-            "low_minor": _percentile(values, rules.low_percentile),
-            "high_minor": _percentile(values, rules.high_percentile),
+            "median_minor": _percentile(values, 50) if figures else None,
+            "low_minor": _percentile(values, rules.low_percentile) if figures else None,
+            "high_minor": _percentile(values, rules.high_percentile) if figures else None,
             "n_prices": len(pool),
+            "n_free": len(frees),
             "n_fresh": ages.count(_FRESH_AGE),
             "n_older": sum(a in ("older", "unclear") for a in ages),
             "n_undated": ages.count("undated"),

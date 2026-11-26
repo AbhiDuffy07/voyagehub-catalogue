@@ -2,7 +2,11 @@
 # Nothing here is country-specific. Change a value only together with its reason, and bump
 # price_rules_version.
 
-price_rules_version = 1
+# v2 (2026-11-26): bands from paid prices only, free prices counted as n_free; nearest-rank
+# percentiles, so every figure is an amount a listing gave. v1 mixed free listings in as zero and
+# interpolated: Ahmedabad sights (6 free, Rs 10, Rs 30) showed Rs 0-2.50, and 190 of 481 India
+# bands had a figure no listing gave.
+price_rules_version = 2
 
 # Freshness is not set here: a price is shown exactly only when the listing was last edited within
 # two years of the dump (`FRESH_YEARS` in catalogue/listings/lastedit.py, the same cutoff as B3's
@@ -18,9 +22,11 @@ sleep = ["per night"]
 [bands]
 # Kinds that get a band (a listing's own section, not its Wikidata kind).
 kinds = ["see", "do", "eat", "drink", "sleep"]
-# Fewer prices than this and no band is published: "Check on official site".
+# Fewer prices (paid and free) than this and no band is published: "Check on official site".
+# Fewer paid prices than this and the band has no figures, only the counts (n_prices, n_free).
 min_prices = 3
-# The range shown is the middle of the spread (these percentiles); the figure is the median.
+# The range shown is the middle of the paid spread (these percentiles, nearest rank); the
+# figure is the median.
 low_percentile = 25
 high_percentile = 75
 

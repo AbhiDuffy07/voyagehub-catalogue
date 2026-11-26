@@ -106,6 +106,7 @@ class PriceBand(_Model):
     label: str
     n_prices: int | None
     n_fresh: int | None
+    n_free: int | None = None  # free prices counted beside the paid range (never in it)
 
 
 class RideApp(_Model):

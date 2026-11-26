@@ -541,6 +541,18 @@
           ],
           "title": "Median Minor"
         },
+        "n_free": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Free"
+        },
         "n_fresh": {
           "anyOf": [
             {

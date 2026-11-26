@@ -283,6 +283,7 @@ def build(tmp_path: Path) -> dict:
             "label": "approximate",
             "n_prices": 7,
             "n_fresh": 0,
+            "n_free": 2,
         }
     ]
     costs = [

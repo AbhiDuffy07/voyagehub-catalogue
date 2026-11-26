@@ -48,7 +48,7 @@ def listing(entries, *, kind="see", edit="2026-03-04", status="parsed", free=Fal
 
 
 def test_committed_rules_load():
-    assert RULES.version == 1 and RULES.fresh_years == 2 and RULES.min_prices == 3
+    assert RULES.version == 2 and RULES.fresh_years == 2 and RULES.min_prices == 3
     assert "see" in RULES.band_kinds and RULES.meals_full_day == 2
 
 
@@ -221,10 +221,61 @@ def test_too_few_fresh_prices_pool_with_older_and_undated_ones():
     assert band["oldest_edit"] == "2019-01-01" and band["newest_edit"] == "2026-03-04"
 
 
-def test_free_listings_count_as_zero_in_the_band():
-    pool = [classify_listing(listing([entry(free=True)], free=True), DUMP, RULES)] * 2
-    band = build_bands(pool + banded([100]), RULES)[(7, "see", "INR", "foreigner")]
-    assert band["median_minor"] == 0 and band["high_minor"] == 5000
+def free_listing(edit="2026-03-04", city=7):
+    return classify_listing(
+        listing([entry(free=True)], free=True, edit=edit, owner_page_id=city), DUMP, RULES
+    )
+
+
+def test_free_listings_are_counted_but_never_mixed_into_the_paid_range():
+    pool = [free_listing()] * 2 + banded([100, 200, 300])
+    band = build_bands(pool, RULES)[(7, "see", "INR", "foreigner")]
+    assert (band["low_minor"], band["median_minor"], band["high_minor"]) == (10000, 20000, 30000)
+    assert band["n_prices"] == 3 and band["n_free"] == 2
+
+
+def test_every_figure_is_a_price_someone_listed():
+    # Linear interpolation gave 250 paise between a free listing and Rs 10: nobody's price.
+    values = [10, 30, 45, 80, 120, 200, 210, 999]
+    band = build_bands(banded(values), RULES)[(7, "see", "INR", "foreigner")]
+    listed = {v * 100 for v in values}
+    assert {band["low_minor"], band["median_minor"], band["high_minor"]} <= listed
+    # nearest rank: p25 of 8 is the 2nd value, the median the 4th, p75 the 6th
+    assert (band["low_minor"], band["median_minor"], band["high_minor"]) == (3000, 8000, 20000)
+
+
+def test_ahmedabad_sights_six_free_and_two_paid_give_a_count_but_no_figures():
+    # Real case (dump 20261101): six "Free", Rs 10 (undated) and Rs 20 child / Rs 30 adult (2022).
+    free = [
+        free_listing(edit=e) for e in (None, "2024-08-04", "2025-07-06", None, None, "2016-11-30")
+    ]
+    paid = banded([10], edit=None) + [
+        classify_listing(
+            listing([entry(20, audience="child"), entry(30, audience="adult")], edit="2022-11-14"),
+            DUMP,
+            RULES,
+        )
+    ]
+    bands = build_bands(free + paid, RULES)
+    for group in ("resident", "foreigner"):
+        band = bands[(7, "see", "INR", group)]
+        assert (band["low_minor"], band["median_minor"], band["high_minor"]) == (None, None, None)
+        assert band["n_prices"] == 2 and band["n_free"] == 6
+
+
+def test_a_free_only_city_takes_its_countrys_currency_and_has_no_figures():
+    bands = build_bands([free_listing()] * 3, RULES, city_currency={7: "INR"})
+    band = bands[(7, "see", "INR", "foreigner")]
+    assert band["median_minor"] is None and band["n_prices"] == 0 and band["n_free"] == 3
+
+
+def test_a_free_only_city_with_an_unknown_currency_gets_no_band():
+    assert build_bands([free_listing()] * 3, RULES, city_currency={7: None}) == {}
+    assert build_bands([free_listing()] * 3, RULES) == {}
+
+
+def test_too_few_paid_and_free_prices_together_give_no_band():
+    assert build_bands([free_listing()] + banded([10]), RULES) == {}
 
 
 def test_bands_are_per_city_kind_currency_and_visitor_group():
