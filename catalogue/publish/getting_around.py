@@ -1,9 +1,11 @@
 """The getting_around field: a credited excerpt of the Wikivoyage "Get around" section and the
-country's ride apps (names and official links from config/ride_apps.toml, no logos, no fares)."""
+ride apps whose own site lists the city (names and official links from config/ride_apps.toml, no
+logos, no fares)."""
 
 import re
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,8 @@ from catalogue.publish.hero import CONTENT_PATH
 RIDE_APPS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "ride_apps.toml"
 MARKUP = re.compile(r"\[\[|\]\]|\{\{|\}\}|<[^>]*>|''")
 SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+COVERAGE = ("cities", "nationwide", "unknown")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +36,40 @@ def load_content_rules(path: Path = CONTENT_PATH) -> ContentRules:
     return ContentRules(*values)
 
 
+def _https(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith("https://")
+
+
+def _app(app: Any) -> dict[str, Any] | None:
+    """One checked app entry, or None when anything is missing or of the wrong shape."""
+    if not isinstance(app, dict):
+        return None
+    coverage, cities = app.get("coverage"), app.get("cities")
+    required = {"name", "url", "source_url", "checked", "coverage"}
+    if coverage == "cities":
+        if not (
+            isinstance(cities, list)
+            and cities
+            and all(isinstance(c, str) and SLUG.fullmatch(c) for c in cities)
+        ):
+            return None
+        required.add("cities")
+    if (
+        set(app) != required
+        or coverage not in COVERAGE
+        or not isinstance(app["name"], str)
+        or not app["name"].strip()
+        or not _https(app["url"])
+        or not _https(app["source_url"])
+        or type(app["checked"]) is not date  # a TOML date, not a date-time or a string
+    ):
+        return None
+    return {**app, "name": app["name"].strip(), "cities": frozenset(cities or ())}
+
+
 def load_ride_apps(path: Path = RIDE_APPS_PATH) -> dict[str, dict[str, Any]]:
-    """Country code to {"apps": [{"name", "url"}], "note"}; checked so a typo cannot publish."""
+    """Country code to {"apps": [checked app entries], "note"}; checked so a typo cannot publish.
+    Which apps a city shows is `apps_for`."""
     try:
         table = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
@@ -42,27 +78,37 @@ def load_ride_apps(path: Path = RIDE_APPS_PATH) -> dict[str, dict[str, Any]]:
     for country, entry in table.items():
         apps = entry.get("apps") if isinstance(entry, dict) else None
         note = entry.get("note") if isinstance(entry, dict) else None
+        checked = [_app(a) for a in apps] if isinstance(apps, list) else []
         if (
             not re.fullmatch(r"[A-Z]{2}", country)
             or not isinstance(note, str)
             or not note.strip()
-            or not isinstance(apps, list)
-            or not apps
-            or not all(
-                isinstance(a, dict)
-                and set(a) == {"name", "url"}
-                and isinstance(a["name"], str)
-                and a["name"].strip()
-                and isinstance(a["url"], str)
-                and a["url"].startswith("https://")
-                for a in apps
-            )
+            or not checked
+            or None in checked
         ):
             raise PipelineError(
-                f"{path.name}: [{country}] needs a note and apps with a name and an https url"
+                f"{path.name}: [{country}] needs a note and apps with a name, an https url and "
+                "source_url, a checked date and a coverage (cities with catalogue slugs, "
+                "nationwide, or unknown)"
             )
-        found[country] = {"apps": [dict(a) for a in apps], "note": note.strip()}
+        found[country] = {"apps": checked, "note": note.strip()}
     return found
+
+
+def apps_for(
+    table: dict[str, dict[str, Any]], country_iso: str | None, slug: str
+) -> dict[str, Any] | None:
+    """The apps whose own site lists this city or says it serves the whole country, as published
+    ({"apps": [{"name", "url"}], "note"}); None when there are none (unknown is never shown)."""
+    entry = table.get(country_iso or "")
+    if entry is None:
+        return None
+    shown = [
+        {"name": a["name"], "url": a["url"]}
+        for a in entry["apps"]
+        if a["coverage"] == "nationwide" or (a["coverage"] == "cities" and slug in a["cities"])
+    ]
+    return {"apps": shown, "note": entry["note"]} if shown else None
 
 
 def _paragraphs(text: str) -> list[str]:

@@ -11,6 +11,7 @@ from typing import Any
 from catalogue.blocks.inputs import _point
 from catalogue.publish.getting_around import (
     ContentRules,
+    apps_for,
     excerpt_of,
     load_content_rules,
     load_ride_apps,
@@ -227,7 +228,7 @@ def _getting_around(row: dict[str, Any], pid: int, up: Upstream) -> dict[str, An
         }
     elif text:
         up.counts["getting_around_left_out_no_credit"] += 1
-    apps = up.ride_apps.get(str(row.get("country_iso") or ""))
+    apps = apps_for(up.ride_apps, row.get("country_iso"), row["slug"])
     return {"excerpt": excerpt, "ride_apps": apps}
 
 

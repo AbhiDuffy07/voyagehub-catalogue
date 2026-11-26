@@ -153,7 +153,7 @@ def test_published_bands_carry_the_currency_code_and_minor_units(
     assert [(x["currency"], x["median_minor"]) for x in city["price_bands"]] == [(currency, median)]
 
 
-# --- ride apps are India only -----------------------------------------------------------------
+# --- ride apps: only where a table lists the city ---------------------------------------------
 
 
 @pytest.mark.parametrize("country", ["US", "JP", "GB", "DE", None])
@@ -171,7 +171,21 @@ def test_ride_apps_are_null_outside_india(country):
     assert city["getting_around"]["ride_apps"] is None
 
 
-def test_ride_apps_are_present_for_india():
+def test_ride_apps_are_present_for_an_indian_city_an_app_lists():
+    row = {
+        "wikivoyage_page_id": CITY_ID,
+        "slug": "jaipur",
+        "title": "X",
+        "country_iso": "IN",
+        "tier": "browse_only",
+    }
+
+    city = b.build_city(row, _up([]))
+
+    assert city["getting_around"]["ride_apps"]["apps"]
+
+
+def test_ride_apps_are_null_for_an_indian_city_no_app_lists():
     row = {
         "wikivoyage_page_id": CITY_ID,
         "slug": "x",
@@ -182,4 +196,4 @@ def test_ride_apps_are_present_for_india():
 
     city = b.build_city(row, _up([]))
 
-    assert city["getting_around"]["ride_apps"]["apps"]
+    assert city["getting_around"]["ride_apps"] is None

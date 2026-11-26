@@ -1,24 +1,75 @@
-# Ride apps shown on every city of a country (publish-static, field getting_around.ride_apps).
-# Text names and official home pages only: no logos, no fares. Keyed by ISO 3166 country code; a
-# country without a table gets no list (never guessed). Checked 2026-11-15: each link opens the
-# company's own site (Uber blocks scripted requests, its page was confirmed by search instead).
-# Adding a country is a data change: a new [XX] table, same shape.
+# Ride apps shown on a city's page (publish-static, field getting_around.ride_apps).
+# Text names and official home pages only: no logos, no fares.
+#
+# An app is shown in a city only when the app's OWN website lists that city, or says it serves the
+# whole country. Each app records the page that was read (`source_url`) and when (`checked`).
+#   coverage = "cities"      `cities` holds catalogue slugs (data/slugs.json) of the listed cities
+#   coverage = "nationwide"  only when the official site says so in words
+#   coverage = "unknown"     the site gives no list (for example only "250+ cities"): never shown
+# A city that no app lists gets no ride apps, and so does a country without a table. Nothing is
+# guessed from a country, a count of cities or a third-party site. Adding a country is a data
+# change: a new [XX] table, same shape. Nothing in the code is country-specific.
 
 [IN]
-note = "Availability varies by city."
+note = "Availability varies within a city: check the app."
 
 [[IN.apps]]
 name = "Uber"
 url = "https://www.uber.com/in/en/"
+# "Uber cities in India": an alphabetical list of about 1,800 places, mostly census sub-districts.
+# Read in a browser (Uber refuses scripted requests). A catalogue city is listed when the page has
+# the same name in the same state, or the same name with "City", "Urban", "(M)" or "(Suburban)".
+# A "Rural" or numbered block unit ("Burdwan-I", "Patna Rural") is not the city and does not
+# count. Same city under another official name, same state: Ahmadabad City -> ahmedabad,
+# Bangalore -> bengaluru, New Delhi -> delhi (and new-delhi), Allahabad -> prayagraj,
+# Chittaurgarh -> chittorgarh, Coimbatore North/South -> coimbatore, Madurai North/... -> madurai,
+# Mahesana -> mehsana, Udhagamandalam -> ooty, Puducherry -> pondicherry, Daman -> daman-india,
+# Chandigarh -> chandigarh, Jammu -> jammu. The page itself says products "may vary across
+# different cities".
+source_url = "https://www.uber.com/global/en/r/india/cities/"
+checked = 2026-11-26
+coverage = "cities"
+cities = [
+  "adoor", "agra", "ahmedabad", "aizawl", "ajmer", "alibag", "almora", "alwar", "ambala",
+  "asansol", "aurangabad", "bareilly", "bengaluru", "berhampore", "bhubaneswar", "bodh-gaya",
+  "bundi", "chandigarh", "chennai", "chittorgarh", "coimbatore", "coonoor", "daman-india",
+  "dapoli", "dehradun", "delhi", "dhanbad", "dholka", "dungarpur", "faridabad", "gangtok",
+  "ghatshila", "guntur", "guwahati", "gwalior", "hyderabad", "indore", "jabalpur", "jagadhri",
+  "jaipur", "jaisalmer", "jammu", "jamnagar", "jamshedpur", "jhansi", "jodhpur", "kaithal",
+  "kanpur", "kasaragod", "kasauli", "kochi", "kodaikanal", "kolkata", "konark", "kozhikode",
+  "lucknow", "madurai", "mahabaleshwar", "mangalore", "mathura", "mehsana", "mumbai", "mysore",
+  "nabadwip", "nagpur", "nainital", "nashik", "nathdwara", "new-delhi", "ooty", "patan-gujarat",
+  "ponda", "pondicherry", "prayagraj", "punalur", "pune", "pushkar", "rajahmundry", "rajkot",
+  "rishikesh", "robertsganj", "salem-india", "sambalpur", "sawai-madhopur", "shimla", "surat",
+  "thane", "thanjavur", "thiruvananthapuram", "thrissur", "tiruchirappalli", "tirupati",
+  "tiruttani", "udupi", "vadnagar", "vadodara", "varanasi", "varkala", "vijayawada",
+  "visakhapatnam", "yercaud",
+]
 
 [[IN.apps]]
 name = "Ola"
 url = "https://www.olacabs.com/"
+# The home page says "250+ cities" "Across India, Australia, New Zealand and the UK" and links no
+# city list (/cities and /sitemap answer 404).
+source_url = "https://www.olacabs.com/"
+checked = 2026-11-26
+coverage = "unknown"
 
 [[IN.apps]]
 name = "Rapido"
 url = "https://rapido.bike/"
+# The home page says "Present across 400+ cities and counting" and lists no city. /Cities answers
+# with a data feed of 1,460 place records whose meaning the site does not state, so it is not used.
+source_url = "https://rapido.bike/"
+checked = 2026-11-26
+coverage = "unknown"
 
 [[IN.apps]]
 name = "Namma Yatri"
 url = "https://nammayatri.in/"
+# The open-data page's city picker names one city for the Namma Yatri app, Bengaluru, then
+# "Rest of Karnataka" and "Rest of India" (regions, not cities, so they do not count).
+source_url = "https://nammayatri.in/open"
+checked = 2026-11-26
+coverage = "cities"
+cities = ["bengaluru"]

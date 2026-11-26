@@ -121,7 +121,7 @@ class RideApps(_Model):
 
 class GettingAround(_Model):
     excerpt: Text | None  # the Wikivoyage "Get around" section, shortened
-    ride_apps: RideApps | None  # the country's ride apps (names and links only)
+    ride_apps: RideApps | None  # apps whose own site lists the city (names and links only)
 
 
 class CityFile(_Model):

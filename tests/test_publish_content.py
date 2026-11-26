@@ -193,12 +193,12 @@ def test_unphotographed_places_that_are_no_stop_stay_out(tmp_path):
 # --- getting around ---------------------------------------------------------------------------
 
 
-def test_ride_apps_come_from_config_by_country_with_names_and_links_only(tmp_path):
+def test_ride_apps_are_the_ones_whose_site_lists_the_city_with_names_and_links_only(tmp_path):
     result, _ = _build(tmp_path)
     apps = _city(result, "jaipur")["getting_around"]["ride_apps"]
-    assert [a["name"] for a in apps["apps"]] == ["Uber", "Ola", "Rapido", "Namma Yatri"]
+    assert [a["name"] for a in apps["apps"]] == ["Uber"]  # Namma Yatri lists Bengaluru only
     assert all(set(a) == {"name", "url"} and a["url"].startswith("https://") for a in apps["apps"])
-    assert apps["note"] == "Availability varies by city."
+    assert apps["note"] == "Availability varies within a city: check the app."
 
 
 def test_a_country_without_ride_apps_gets_none():
