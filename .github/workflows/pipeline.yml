@@ -233,6 +233,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # Nearby's time budget counts from here, so slow setup steps come out of it.
+      - name: Note the job start
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
@@ -245,6 +249,20 @@ jobs:
           name: out-photos
           path: out
 
+      - name: Nearby rules version
+        id: nearby-rules
+        run: echo "version=$(python -c 'from catalogue.nearby.rules import load_nearby_rules; print(load_nearby_rules().version)')" >> "$GITHUB_OUTPUT"
+
+      # The API cache carries over between runs, so a run that stopped at its time budget is
+      # continued by the next. Entries are immutable, so each run saves a new one (run id in the
+      # key) and restores the newest for the same dump date and rules. No country in the key:
+      # replies are keyed by request, so any country's entry helps.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: out/cache
+          key: nearby-cache-${{ env.DUMP_DATE }}-r${{ steps.nearby-rules.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nearby-cache-${{ env.DUMP_DATE }}-r${{ steps.nearby-rules.outputs.version }}-
+
       # A first photo-select pass says which cities are short of photographed places; nearby looks
       # only at those. The build job selects again with the nearby candidates.
       - name: First photo selection (offline)
@@ -252,16 +270,23 @@ jobs:
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
           python -m catalogue photo-select --dump-date "$DUMP_DATE" "${args[@]}"             --out-dir out/photo_selection_first
 
-      # With country ALL this step probably passes the job's 345 minutes (about 48,000 requests,
-      # see README "World run and time"): run worlds country by country until nearby has a deadline.
+      # Nearby starts no new chunk of cities 300 minutes after the job start (config/nearby.toml
+      # [budget]), so even a world run ends inside the job's 345 minutes; the cities it did not
+      # reach are listed in its manifest, and the next run continues from the cache.
       - name: Nearby places from Wikidata
         env:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
         run: |
           SECONDS=0
           args=(); [ "$COUNTRY" = "ALL" ] || args=(--country "$COUNTRY")
-          python -m catalogue nearby --dump-date "$DUMP_DATE" "${args[@]}"
+          python -m catalogue nearby --dump-date "$DUMP_DATE" "${args[@]}" --started-at "$JOB_STARTED"
           echo "stage seconds: $SECONDS"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: always()
+        with:
+          path: out/cache
+          key: nearby-cache-${{ env.DUMP_DATE }}-r${{ steps.nearby-rules.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Hand over to the next job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
