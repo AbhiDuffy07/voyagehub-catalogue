@@ -13,6 +13,8 @@ NEARBY_RULES_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "
 MAX_SEARCH_RADIUS_M = 150  # owner limit for Commons geosearch around a place
 MAX_PLACES_RADIUS_KM = 10  # the GeoData API refuses a larger search radius
 MAX_RESULT_LIMIT = 500  # the GeoData API's own limit per request
+MAX_BUDGET_MINUTES = 340  # the CI job stops at 345 minutes; output and cache need a few
+MAX_CHUNK_CITIES = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,8 @@ class NearbyRules:
     same_place_km: float
     any_name_km: float
     cache_max_age_days: int
+    budget_minutes: int
+    chunk_cities: int
 
 
 def _table(document: dict[str, Any], name: str, source: str) -> dict[str, Any]:
@@ -79,8 +83,10 @@ def load_nearby_rules(path: Path = NEARBY_RULES_PATH) -> NearbyRules:
     geo = _table(document, "geosearch", source)
     places = _table(document, "places", source)
     cache = _table(document, "cache", source)
+    budget = _table(document, "budget", source)
     _reason(geo, "geosearch", source)
     _reason(places, "places", source)
+    _reason(budget, "budget", source)
     enabled = geo.get("enabled")
     if not isinstance(enabled, bool):
         raise PipelineError(f"{source}: enabled needs true or false")
@@ -107,4 +113,6 @@ def load_nearby_rules(path: Path = NEARBY_RULES_PATH) -> NearbyRules:
         same_place_km=float(_number(places, "same_place_km", source, whole=False)),
         any_name_km=float(_number(places, "any_name_km", source, whole=False, zero_ok=True)),
         cache_max_age_days=_number(cache, "max_age_days", source),
+        budget_minutes=_number(budget, "minutes", source, high=MAX_BUDGET_MINUTES),
+        chunk_cities=_number(budget, "chunk_cities", source, high=MAX_CHUNK_CITIES),
     )

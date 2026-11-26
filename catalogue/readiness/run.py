@@ -43,12 +43,10 @@ from catalogue.listings.run import parse_dump_date
 from catalogue.nearby.inputs import PLACES_FILE as NEARBY_PLACES_FILE
 from catalogue.nearby.inputs import extra_places, nearby_for
 from catalogue.photos.select import REJECTED_PATH
-from catalogue.publish.build import photo_of
 from catalogue.publish.hero import (
     CONTENT_PATH,
     HEROES_PATH,
     HeroRules,
-    hero_problem,
     load_hero_rules,
 )
 from catalogue.readiness.near_miss import near_miss_csv, near_miss_markdown, near_misses
@@ -60,10 +58,14 @@ from catalogue.readiness.rules import (
     assess_city,
     decide_publication,
     load_readiness_rules,
+    photo_counts,
     place_owners,
 )
 
 SCHEMA_VERSION = 1
+# The only rules nearby can change: its extra places count as places, and their Wikidata images
+# may be heroes. A city nearby did not reach is held only when nothing else fails.
+NEARBY_FIXABLE = frozenset({"photographed_places", "hero_photo"})
 BLOCKS_FILE = "day_blocks.jsonl"
 CHECKS_FILE = "block_checks.jsonl"
 TIMEZONES_FILE = "destination_timezones.jsonl"
@@ -97,7 +99,8 @@ class ReadinessResult:
                 f"ready: {t['ready']} (plannable {t['plannable']}, browse only "
                 f"{t['browse_only']}); not ready: {t['not_ready']}",
                 f"publish {t['publish']}, keep {t['keep']}, pending unpublish "
-                f"{t['keep_pending_unpublish']}, unpublish {t['unpublish']}, "
+                f"{t['keep_pending_unpublish']}, kept, not reached by nearby "
+                f"{t['keep_not_reached']}, unpublish {t['unpublish']}, "
                 f"blocked (no slug) {t['blocked_no_slug']}",
             ]
         )
@@ -242,6 +245,8 @@ def _report(totals: dict[str, Any], dump_date: str, rules: ReadinessRules) -> st
         f"- publish (newly ready): {t['publish']}; keep: {t['keep']}",
         f"- failed once, still published: {t['keep_pending_unpublish']}; unpublished after "
         f"{rules.unpublish_after_failed_runs} failed runs: {t['unpublish']}",
+        f"- not reached by nearby for time; state held: {t['keep_not_reached']} (published, "
+        "failing only on photographed places or hero photo, which nearby did not get to)",
         f"- ready but not published, no slug in data/slugs.json: {t['blocked_no_slug']}",
         "  (the static page needs a slug; slugs are assigned only in a reviewed discover wave, "
         "so these wait for one)",
@@ -327,6 +332,9 @@ def run_readiness(
     )
     if nearby is not None:
         hashes[NEARBY_PLACES_FILE] = nearby.places_sha256
+        # The manifest holds the cities nearby did not reach, which can hold a city's state.
+        hashes["nearby_manifest.json"] = nearby.manifest_sha256
+    not_reached = nearby.cities_not_reached if nearby is not None else frozenset()
     previous = _read_previous(previous_folder, country_filter) if previous_folder else {}
     if previous_folder:
         hashes["previous_state.json"] = _sha256(previous_folder / STATE_FILE)
@@ -365,30 +373,12 @@ def run_readiness(
     except (KeyError, TypeError):
         raise _damaged(f"{LISTINGS_FILE}, {SUMMARIES_FILE} or {TIMEZONES_FILE}") from None
 
-    hero: Counter[int] = Counter()
-    places: Counter[int] = Counter()
-    unowned_photos = 0
-    # The very predicates publish-static uses: a photo it would leave out (no credit, a bad author)
-    # is no photographed place, and a photo that may not be a hero (size, rejection lists, collage
-    # name, author) is no hero.
     photo_rules = hero_rules if hero_rules is not None else load_hero_rules()
     try:
-        for r in _rows(photos_folder / PHOTOS_FILE):
-            if not r.get("photo"):
-                continue
-            is_article = r["subject"] == "article"
-            owner = r["page_id"] if is_article else place_owner.get((r["page_id"], r["ordinal"]))
-            if owner is None:
-                unowned_photos += 1  # a photo of a listing that is not a place (or has no name)
-                continue
-            published = photo_of(r, Counter(), photo_rules) is not None
-            if not is_article:
-                if not published:
-                    continue  # publish-static leaves it out, so it is no photographed place
-                places[owner] += 1
-            hero[owner] += published and hero_problem(r, photo_rules) is None
+        counts = photo_counts(_rows(photos_folder / PHOTOS_FILE), place_owner, photo_rules)
     except (KeyError, TypeError):
         raise _damaged(PHOTOS_FILE) from None
+    hero, places, unowned_photos = counts.hero, counts.places, counts.unowned
 
     try:
         blocks = list(_rows(blocks_folder / BLOCKS_FILE))
@@ -432,7 +422,11 @@ def run_readiness(
             verdict = assess_city(facts, rules)
             slug = slugs.get(pid)
             state, action = decide_publication(
-                previous.get(pid), ready=verdict.ready, rules=rules, has_slug=slug is not None
+                previous.get(pid),
+                ready=verdict.ready,
+                rules=rules,
+                has_slug=slug is not None,
+                not_reached=pid in not_reached and set(verdict.failed) <= NEARBY_FIXABLE,
             )
             new_state[pid] = state
             actions[action] += 1
@@ -500,6 +494,7 @@ def run_readiness(
         "publish": actions["publish"],
         "keep": actions["keep"],
         "keep_pending_unpublish": actions["keep_pending_unpublish"],
+        "keep_not_reached": actions["keep_not_reached"],
         "unpublish": actions["unpublish"],
         "blocked_no_slug": actions["blocked_no_slug"],
         "missing_from_run": len(missing),

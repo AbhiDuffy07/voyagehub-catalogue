@@ -24,6 +24,10 @@ any_name_km = 0.04
 reason = "why"
 [cache]
 max_age_days = 30
+[budget]
+minutes = 300
+chunk_cities = 25
+reason = "why"
 """
 
 
@@ -54,6 +58,7 @@ def test_a_good_file_loads_every_value(tmp_path):
     assert rules.max_per_city == 10
     assert rules.same_place_km == 0.15 and rules.any_name_km == 0.04
     assert rules.cache_max_age_days == 30
+    assert rules.budget_minutes == 300 and rules.chunk_cities == 25
 
 
 def test_name_free_radius_zero_is_allowed(tmp_path):
@@ -87,6 +92,12 @@ def test_geosearch_can_be_switched_off(tmp_path):
         ("enabled = true", 'enabled = "no"'),
         ("enabled = true", "enabled = 1"),
         ("enabled = true\n", ""),
+        ("minutes = 300", "minutes = 0"),
+        ("minutes = 300", "minutes = 341"),
+        ("chunk_cities = 25", "chunk_cities = 0"),
+        ("chunk_cities = 25", "chunk_cities = 1001"),
+        ('[budget]\nminutes = 300\nchunk_cities = 25\nreason = "why"\n', ""),
+        ('chunk_cities = 25\nreason = "why"', "chunk_cities = 25"),
     ],
 )
 def test_bad_values_are_refused_with_the_file_name(tmp_path, old, new):

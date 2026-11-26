@@ -61,15 +61,33 @@ class ApiCache:
     def get(
         self, client: PoliteClient, url: str, params: Mapping[str, str | int]
     ) -> dict[str, Any]:
-        path = self._path(url, params)
-        body = self._read(path)
+        body = self.lookup(url, params)
+        if body is None:
+            body = self.fetch(client, url, params)
+            self.store(url, params, body)
+        return body
+
+    def lookup(self, url: str, params: Mapping[str, str | int]) -> dict[str, Any] | None:
+        """The stored reply to this question, or None (counted as a hit when found)."""
+        body = self._read(self._path(url, params))
         if body is not None:
             with self._lock:
                 self.hits += 1
-            return body
+        return body
+
+    def fetch(
+        self, client: PoliteClient, url: str, params: Mapping[str, str | int]
+    ) -> dict[str, Any]:
+        """Ask the API (counted as a miss) without storing the reply: for a caller that stores
+        its parts under keys of their own."""
         body = api_get(client, url, params, sleep=self._sleep)
         with self._lock:
             self.misses += 1
+        return body
+
+    def store(self, url: str, params: Mapping[str, str | int], body: dict[str, Any]) -> None:
+        """Keep `body` as the reply to this question (only replies `api_get` accepted)."""
+        path = self._path(url, params)
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
             entry = {
@@ -81,4 +99,3 @@ class ApiCache:
             temporary = path.with_name(f"{path.name}.{threading.get_ident()}.tmp")
             temporary.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
             os.replace(temporary, path)
-        return body

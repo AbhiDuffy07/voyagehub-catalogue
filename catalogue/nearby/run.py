@@ -32,7 +32,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from catalogue.blocks.inputs import ARTICLES_FILE, LISTINGS_FILE, _point, _verify, _verify_articles
+from catalogue.blocks.inputs import (
+    ARTICLES_FILE,
+    LISTINGS_FILE,
+    SUMMARIES_FILE,
+    _point,
+    _verify,
+    _verify_articles,
+)
 from catalogue.blocks.rules import BlockRules, load_block_rules
 from catalogue.discover.output import write_manifest, write_text
 from catalogue.enrich.claims import ItemFacts, parse_item
@@ -48,6 +55,7 @@ from catalogue.listings.quality import distance_km
 from catalogue.listings.run import parse_dump_date
 from catalogue.nearby.cache import ApiCache
 from catalogue.nearby.inputs import CANDIDATES_FILE, PLACES_FILE
+from catalogue.nearby.order import city_order
 from catalogue.nearby.pick import (
     CentreIndex,
     GeoHit,
@@ -74,9 +82,14 @@ from catalogue.photos.run import INPUT_FILES, Candidate, Subject
 from catalogue.photos.run import _row as candidate_row
 from catalogue.photos.select import SelectionRules, load_selection_rules
 from catalogue.photos.select_run import PHOTO_FIELDS, _verify_photos
-from catalogue.publish.build import photo_of
+from catalogue.progress import Progress
 from catalogue.publish.hero import HeroRules, load_hero_rules
-from catalogue.readiness.rules import ReadinessRules, load_readiness_rules, place_owners
+from catalogue.readiness.rules import (
+    ReadinessRules,
+    load_readiness_rules,
+    photo_counts,
+    place_owners,
+)
 
 SCHEMA_VERSION = 1
 SELECTION_FILE = "photo_selection.jsonl"
@@ -113,6 +126,8 @@ class NearbyResult:
                     else "Commons geosearch: off"
                 ),
                 f"requests: {t['cache']['misses']} sent, {t['cache']['hits']} from the cache",
+                f"cities done: {t['cities_reached']} of {t['short_cities']}; skipped for time: "
+                f"{t['cities_not_reached']}",
             ]
         )
 
@@ -133,25 +148,6 @@ class Place:
 
 
 # --- inputs -------------------------------------------------------------------------------------
-
-
-def photographed_places(
-    owners: Mapping[tuple[int, int], int],
-    selection_rows: Iterable[Mapping[str, Any]],
-    hero: HeroRules,
-) -> tuple[Counter, set[tuple[int, int]]]:
-    """Photographed places per city, exactly as readiness counts them, and the places counted."""
-    counts: Counter = Counter()
-    done: set[tuple[int, int]] = set()
-    for r in selection_rows:
-        if not r.get("photo") or r["subject"] == "article":
-            continue
-        key = (r["page_id"], r["ordinal"])
-        owner = owners.get(key)
-        if owner is not None and photo_of(dict(r), Counter(), hero) is not None:
-            counts[owner] += 1
-            done.add(key)
-    return counts, done
 
 
 def _listing_point(
@@ -236,32 +232,52 @@ def _hit_point(hit: Mapping[str, Any]) -> tuple[float, float] | None:
 def _fetch_entities(
     cache: ApiCache, client: PoliteClient, qids: Iterable[str]
 ) -> dict[str, ItemFacts]:
-    wanted = sorted(set(qids), key=lambda q: int(q[1:]))
-    batches = [wanted[i : i + ENTITY_BATCH] for i in range(0, len(wanted), ENTITY_BATCH)]
-    items: dict[str, ItemFacts] = {}
+    """Each item is cached under its own one-item question, so an item read once is never asked
+    again, whichever cities shared its batch (chunks change that between runs); only the items
+    not in the cache are asked for, in batches."""
+    base = {
+        "action": "wbgetentities",
+        "props": "claims|sitelinks|labels",
+        "languages": "en",
+        "sitefilter": "enwiki",
+    }
+
+    def one(qid: str) -> dict[str, str]:
+        return {**base, "ids": qid}
+
+    entities: dict[str, Any] = {}
+    unread: list[str] = []
+    for qid in sorted(set(qids), key=lambda q: int(q[1:])):
+        stored = cache.lookup(WIKIDATA_API, one(qid))
+        found = stored.get("entities") if stored else None
+        entity = found.get(qid) if isinstance(found, dict) else None
+        if isinstance(entity, dict):  # a damaged entry is read again
+            entities[qid] = entity
+        else:
+            unread.append(qid)
+    batches = [unread[i : i + ENTITY_BATCH] for i in range(0, len(unread), ENTITY_BATCH)]
 
     def read(batch: list[str]) -> dict[str, Any]:
-        return cache.get(
-            client,
-            WIKIDATA_API,
-            {
-                "action": "wbgetentities",
-                "ids": "|".join(batch),
-                "props": "claims|sitelinks|labels",
-                "languages": "en",
-                "sitefilter": "enwiki",
-            },
-        )
+        return cache.fetch(client, WIKIDATA_API, {**base, "ids": "|".join(batch)})
 
     for batch, reply in _run_bounded(batches, read, "Wikidata items near cities"):
-        entities = reply.get("entities")
-        if not isinstance(entities, dict) or not set(batch) <= set(entities):
+        answered = reply.get("entities")
+        if not isinstance(answered, dict) or not all(
+            isinstance(answered.get(q), dict) for q in batch
+        ):
             raise PipelineError("Wikidata's reply did not include every requested item")
         for requested in batch:
-            entity = entities[requested]
-            # A merged item answers under its new ID; it is used only under the ID it really has.
-            if "missing" not in entity and entity.get("id", requested) == requested:
-                items[requested] = parse_item(requested, entity)
+            entities[requested] = answered[requested]
+            cache.store(
+                WIKIDATA_API, one(requested), {"entities": {requested: answered[requested]}}
+            )
+
+    items: dict[str, ItemFacts] = {}
+    for requested in sorted(entities, key=lambda q: int(q[1:])):
+        entity = entities[requested]
+        # A merged item answers under its new ID; it is used only under the ID it really has.
+        if "missing" not in entity and entity.get("id", requested) == requested:
+            items[requested] = parse_item(requested, entity)
     return items
 
 
@@ -353,6 +369,9 @@ def _report(totals: Mapping[str, Any], dump_date: str, rules: NearbyRules) -> st
                 if rules.geosearch_enabled
                 else "- Commons geosearch: off (config/nearby.toml [geosearch] enabled)"
             ),
+            f"- cities done: {totals['cities_reached']} of {totals['short_cities']}; skipped for "
+            f"time: {totals['cities_not_reached']} (budget {totals['budget_minutes']} minutes; the "
+            f"next run continues from the cache)",
             f"- candidate rows: {totals['candidate_rows']}",
             f"- searches skipped because the search service stayed too busy: "
             f"{totals['searches_busy']} (run again to fill them; the cache keeps the rest)",
@@ -383,6 +402,7 @@ def run_nearby(
     enrich_folder: Path,
     photos_folder: Path,
     selection_folder: Path,
+    summaries_folder: Path,
     out_dir: Path,
     cache_dir: Path | None,
     dump_date: str,
@@ -391,7 +411,11 @@ def run_nearby(
     rules: NearbyRules | None = None,
     readiness: ReadinessRules | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    started_at: float | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> NearbyResult:
+    """`started_at` (epoch seconds, default: now) is when the job began: no new chunk of cities is
+    started `[budget] minutes` after it."""
     parse_dump_date(dump_date)
     rules = rules if rules is not None else load_nearby_rules()
     readiness = readiness if readiness is not None else load_readiness_rules()
@@ -406,6 +430,9 @@ def run_nearby(
         LISTINGS_FILE: _verify(listings_folder, LISTINGS_FILE, "fetch-listings", country_filter),
         ARTICLES_FILE: _verify_articles(discover_folder, listings_folder),
         SELECTION_FILE: _verify(selection_folder, SELECTION_FILE, "photo-select", country_filter),
+        SUMMARIES_FILE: _verify(
+            summaries_folder, SUMMARIES_FILE, "wikipedia-summary", country_filter
+        ),
     }
     candidates_manifest, recorded_enrich, _ = _verify_photos(photos_folder, country_filter)
     _, enrich_hashes = verify_enrich_output(enrich_folder, country_filter, INPUT_FILES)
@@ -441,13 +468,18 @@ def run_nearby(
         }
         listings = list(_rows(listings_folder / LISTINGS_FILE))
         owners = place_owners(listings, readiness.place_sections)
-        counts, photographed = photographed_places(
-            owners, _rows(selection_folder / SELECTION_FILE), hero
-        )
+        pass_one = photo_counts(_rows(selection_folder / SELECTION_FILE), owners, hero)
+        counts, photographed = pass_one.places, pass_one.counted
         used_files = {
             str(r["photo"]["commons_file"])
             for r in _rows(selection_folder / SELECTION_FILE)
             if r.get("photo")
+        }
+        # The same test readiness applies: an article row with a non-empty summary.
+        has_summary = {
+            r["page_id"]
+            for r in _rows(summaries_folder / SUMMARIES_FILE)
+            if r["subject"] == "article" and r.get("summary")
         }
     except (KeyError, TypeError):
         raise PipelineError("an input file has a damaged row") from None
@@ -516,261 +548,291 @@ def run_nearby(
     search = _Searcher(cache, client, sleep)
     read_at = today.isoformat()
 
-    # --- step 1: extra places from Wikidata -----------------------------------------------------
     places_skipped: Counter = Counter()
-    searched_cities = sorted(pid for pid in short if pid in centres)
-    places_skipped["city_without_centre"] = len(short) - len(searched_cities)
-    near: dict[int, list[tuple[str, float]]] = {}
-    for pid, hits in _run_bounded(
-        searched_cities,
-        lambda pid: search(
-            WIKIDATA_API, centres[pid], int(rules.places_radius_km * 1000), rules.places_limit, {}
-        ),
-        "Wikidata near cities",
-        workers=SEARCH_WORKERS,
-    ):
-        found: list[tuple[str, float]] = []
-        if hits is None:
-            places_skipped["city_search_busy"] += 1
-            hits = []
-        for h in hits:
-            qid = str(h.get("title") or "")
-            if not (qid.startswith("Q") and qid[1:].isdigit()):
-                continue
-            if qid in destination_qids:
-                places_skipped["destination"] += 1
-            elif qid in listing_qids:
-                places_skipped["same_as_listing"] += 1
-            else:
-                found.append((qid, float(h.get("dist") or 0.0)))
-        near[pid] = found
-    city_qids = {destinations[pid]["wikidata_id"] for pid in searched_cities}
-    items = _fetch_entities(
-        cache, client, {q for found in near.values() for q, _ in found} | (city_qids - {None})
-    )
-
-    provisional: dict[int, list[tuple[str, ItemFacts, str, float]]] = {}
-    for pid in searched_cities:
-        city_item = items.get(destinations[pid].get("wikidata_id") or "")
-        allowed = set(city_item.countries) if city_item else set()
-
-        def rank(entry: tuple[str, float]) -> tuple[Any, ...]:
-            item = items.get(entry[0])
-            return (
-                item is None or item.enwiki_title is None,
-                item is None or not item.heritage,
-                entry[1],
-                int(entry[0][1:]),
-            )
-
-        known = [
-            KnownPlace(p.point, place_words(p.name, selection), p.qid)
-            for p in places_by_city.get(pid, [])
-            if p.point
-        ]
-        kept: list[tuple[str, ItemFacts, str, float]] = []
-        for qid, _dist in sorted(near.get(pid, []), key=rank):
-            item = items.get(qid)
-            if item is None:
-                places_skipped["item_missing"] += 1
-                continue
-            if not item.label:
-                places_skipped["no_label"] += 1
-                continue
-            if item.coordinate_status != "ok" or item.coordinate is None:
-                places_skipped["no_point"] += 1
-                continue
-            if not item.image:
-                places_skipped["no_image"] += 1
-                continue
-            place_kind, _ = kind_of(item, kind_map)
-            if place_kind not in rules.kinds:
-                places_skipped["kind"] += 1
-                continue
-            if not allowed:
-                places_skipped["country_unknown"] += 1
-                continue
-            if not set(item.countries) & allowed:
-                places_skipped["other_country"] += 1
-                continue
-            point = (item.coordinate.lat, item.coordinate.lon)
-            if centre_index.nearest(point, rules.places_radius_km, pid) != pid:
-                places_skipped["nearer_other_city"] += 1
-                continue
-            words = place_words(item.label, selection)
-            if any(same_place(point, words, qid, k, rules) for k in known):
-                places_skipped["same_as_listing"] += 1
-                continue
-            known.append(KnownPlace(point, words, qid))
-            kept.append((qid, item, place_kind, distance_km(point, centres[pid])))
-        provisional[pid] = kept
-
-    p18_titles = {f"File:{item.image}" for kept in provisional.values() for _, item, _, _ in kept}
-
-    # --- step 2: Commons files near places without a photo --------------------------------------
-    subjects: list[Place] = []
-    for pid in sorted(short):
-        for p in places_by_city.get(pid, []):
-            key = (p.page_id, p.ordinal)
-            if key not in owners or key in photographed:
-                continue
-            if not rules.geosearch_enabled:
-                subjects_skipped["geosearch_off"] += 1
-            elif p.point is None:
-                subjects_skipped[point_status[key]] += 1
-            elif key in shared:
-                subjects_skipped["coord_shared"] += 1
-            else:
-                subjects.append(p)
-    geo_hits: dict[Place, list[GeoHit]] = {}
-    for subject, hits in _run_bounded(
-        subjects,
-        lambda s: search(
-            COMMONS_API,
-            s.point,
-            rules.search_radius_m,
-            rules.geosearch_limit,
-            {"gsnamespace": 6, "gsprimary": "all"},
-        ),
-        "Commons files near places",
-        workers=SEARCH_WORKERS,
-    ):
-        found_hits: dict[str, GeoHit] = {}
-        if hits is None:
-            subjects_skipped["search_busy"] += 1
-            hits = []
-        for h in hits:
-            point = _hit_point(h)
-            title = str(h.get("title") or "")
-            if point is None or not title.startswith("File:"):
-                continue
-            dist = float(h.get("dist") or 0.0)
-            if title not in found_hits or dist < found_hits[title].distance_m:
-                found_hits[title] = GeoHit(title, point, dist)  # a file with two points: nearest
-        geo_hits[subject] = sorted(found_hits.values(), key=lambda g: (g.distance_m, g.title))
-
+    places_skipped["city_without_centre"] = sum(1 for pid in short if pid not in centres)
     geosearch_skipped: Counter = Counter()
-    accepted_by_subject: dict[Place, list[Any]] = {}
-    for subject in subjects:
-        # The city's own name says nothing about which place a file shows: "Narmada in
-        # Omkareshwar" is not "Omkareshwar Shiva Temple". Those words never count as a match.
-        city_words = place_words(str(cities[subject.owner].get("title") or ""), selection)
-        others = [
-            OtherPlace(p.point, place_words(p.name, selection) - city_words)
-            for p in places_by_city[subject.owner]
-            if p.point and (p.page_id, p.ordinal) != (subject.page_id, subject.ordinal)
-        ] + [
-            OtherPlace(
-                (item.coordinate.lat, item.coordinate.lon),
-                place_words(item.label or "", selection) - city_words,
-            )
-            for _, item, _, _ in provisional.get(subject.owner, [])
-            if item.coordinate
-        ]
-        accepted = accept_hits(
-            geo_hits.get(subject, []),
-            place_words(subject.name, selection) - city_words,
-            others,
-            rules,
-            selection,
-            hero,
-            geosearch_skipped,
-        )
-        accepted_by_subject[subject] = accepted[: rules.max_photos_per_place * 3]
-    geo_titles = {a.hit.title for acc in accepted_by_subject.values() for a in acc}
-    infos: dict[str, FileInfo] = fetch_file_info(client, p18_titles | geo_titles, photo_rules)
-
     photos_failed: Counter = Counter()
-    dump_iso = dump_date
+    place_rows: list[dict[str, Any]] = []
+    candidate_rows: list[dict[str, Any]] = []
+    all_subjects: list[Place] = []
+    with_candidate = 0
 
     def checked_row(
-        subject: Subject, title: str, source: str
+        infos: Mapping[str, FileInfo], subject: Subject, title: str, source: str
     ) -> tuple[dict[str, Any] | None, str | None]:
         info = infos[title]
         candidate = Candidate({source})
-        row = candidate_row(subject, title, candidate, info, photo_rules, dump_iso, read_at)
+        row = candidate_row(subject, title, candidate, info, photo_rules, dump_date, read_at)
         problem = photo_problem(info, _photo_shape(row), photo_rules, selection, hero)
         return (None, problem) if problem else (row, None)
 
-    place_rows: list[dict[str, Any]] = []
-    candidate_rows: list[dict[str, Any]] = []
-    for pid in searched_cities:
-        city = {**cities[pid]}
-        taken = 0
-        for qid, item, place_kind, centre_km in provisional[pid]:
-            if taken >= rules.max_per_city:
-                places_skipped["over_city_cap"] += 1
-                continue
-            title = f"File:{item.image}"
-            extra = _extra_row(city, qid, item, place_kind, centre_km, rules, dump_date, read_at)
-            if infos[title].title.removeprefix("File:") in used_files:
-                places_skipped["photo_already_used"] += 1
-                continue
-            subject = Subject(
-                pid,
-                extra["ordinal"],
-                "listing",
-                extra["listing_key"],
-                city.get("tree_country_iso"),
-                qid,
-                item.image,
-            )
-            row, problem = checked_row(subject, title, "wikidata_p18")
-            if row is None:
-                places_skipped[f"photo_{problem}"] += 1
-                continue
-            used_files.add(row["commons_file"])
-            taken += 1
-            place_rows.append(extra)
-            candidate_rows.append(
-                {
-                    **row,
-                    "subject_name": item.label,
-                    "nearby_source": "wikidata_item",
-                    "nearby_distance_m": None,
-                    "nearby_named": None,
-                    "nearby_rules_version": rules.version,
-                }
-            )
+    def process(chunk: list[int]) -> None:
+        """Everything nearby does for these cities: their requests, checks and rows. A chunk is
+        always finished once started; the time budget is looked at only between chunks."""
+        nonlocal with_candidate
 
-    with_candidate = 0
-    for subject in subjects:
-        kept_rows = 0
-        for accepted in accepted_by_subject[subject]:
-            if kept_rows >= rules.max_photos_per_place:
-                break
-            info = infos[accepted.hit.title]
-            if info.title.removeprefix("File:") in used_files:
-                geosearch_skipped["photo_of_another_place"] += 1
-                continue
-            row, problem = checked_row(
-                Subject(
-                    subject.page_id,
-                    subject.ordinal,
+        # --- step 1: extra places from Wikidata -------------------------------------------------
+        searched_cities = [pid for pid in chunk if pid in centres]
+        near: dict[int, list[tuple[str, float]]] = {}
+        for pid, hits in _run_bounded(
+            searched_cities,
+            lambda pid: search(
+                WIKIDATA_API,
+                centres[pid],
+                int(rules.places_radius_km * 1000),
+                rules.places_limit,
+                {},
+            ),
+            "Wikidata near cities",
+            workers=SEARCH_WORKERS,
+        ):
+            found: list[tuple[str, float]] = []
+            if hits is None:
+                places_skipped["city_search_busy"] += 1
+                hits = []
+            for h in hits:
+                qid = str(h.get("title") or "")
+                if not (qid.startswith("Q") and qid[1:].isdigit()):
+                    continue
+                if qid in destination_qids:
+                    places_skipped["destination"] += 1
+                elif qid in listing_qids:
+                    places_skipped["same_as_listing"] += 1
+                else:
+                    found.append((qid, float(h.get("dist") or 0.0)))
+            near[pid] = found
+        city_qids = {destinations[pid]["wikidata_id"] for pid in searched_cities}
+        items = _fetch_entities(
+            cache, client, {q for found in near.values() for q, _ in found} | (city_qids - {None})
+        )
+
+        provisional: dict[int, list[tuple[str, ItemFacts, str, float]]] = {}
+        for pid in searched_cities:
+            city_item = items.get(destinations[pid].get("wikidata_id") or "")
+            allowed = set(city_item.countries) if city_item else set()
+
+            def rank(entry: tuple[str, float]) -> tuple[Any, ...]:
+                item = items.get(entry[0])
+                return (
+                    item is None or item.enwiki_title is None,
+                    item is None or not item.heritage,
+                    entry[1],
+                    int(entry[0][1:]),
+                )
+
+            known = [
+                KnownPlace(p.point, place_words(p.name, selection), p.qid)
+                for p in places_by_city.get(pid, [])
+                if p.point
+            ]
+            kept: list[tuple[str, ItemFacts, str, float]] = []
+            for qid, _dist in sorted(near.get(pid, []), key=rank):
+                item = items.get(qid)
+                if item is None:
+                    places_skipped["item_missing"] += 1
+                    continue
+                if not item.label:
+                    places_skipped["no_label"] += 1
+                    continue
+                if item.coordinate_status != "ok" or item.coordinate is None:
+                    places_skipped["no_point"] += 1
+                    continue
+                if not item.image:
+                    places_skipped["no_image"] += 1
+                    continue
+                place_kind, _ = kind_of(item, kind_map)
+                if place_kind not in rules.kinds:
+                    places_skipped["kind"] += 1
+                    continue
+                if not allowed:
+                    places_skipped["country_unknown"] += 1
+                    continue
+                if not set(item.countries) & allowed:
+                    places_skipped["other_country"] += 1
+                    continue
+                point = (item.coordinate.lat, item.coordinate.lon)
+                if centre_index.nearest(point, rules.places_radius_km, pid) != pid:
+                    places_skipped["nearer_other_city"] += 1
+                    continue
+                words = place_words(item.label, selection)
+                if any(same_place(point, words, qid, k, rules) for k in known):
+                    places_skipped["same_as_listing"] += 1
+                    continue
+                known.append(KnownPlace(point, words, qid))
+                kept.append((qid, item, place_kind, distance_km(point, centres[pid])))
+            provisional[pid] = kept
+
+        p18_titles = {
+            f"File:{item.image}" for kept in provisional.values() for _, item, _, _ in kept
+        }
+
+        # --- step 2: Commons files near places without a photo ----------------------------------
+        subjects: list[Place] = []
+        for pid in chunk:
+            for p in places_by_city.get(pid, []):
+                key = (p.page_id, p.ordinal)
+                if key not in owners or key in photographed:
+                    continue
+                if not rules.geosearch_enabled:
+                    subjects_skipped["geosearch_off"] += 1
+                elif p.point is None:
+                    subjects_skipped[point_status[key]] += 1
+                elif key in shared:
+                    subjects_skipped["coord_shared"] += 1
+                else:
+                    subjects.append(p)
+        all_subjects.extend(subjects)
+        geo_hits: dict[Place, list[GeoHit]] = {}
+        for subject, hits in _run_bounded(
+            subjects,
+            lambda s: search(
+                COMMONS_API,
+                s.point,
+                rules.search_radius_m,
+                rules.geosearch_limit,
+                {"gsnamespace": 6, "gsprimary": "all"},
+            ),
+            "Commons files near places",
+            workers=SEARCH_WORKERS,
+        ):
+            found_hits: dict[str, GeoHit] = {}
+            if hits is None:
+                subjects_skipped["search_busy"] += 1
+                hits = []
+            for h in hits:
+                point = _hit_point(h)
+                title = str(h.get("title") or "")
+                if point is None or not title.startswith("File:"):
+                    continue
+                dist = float(h.get("dist") or 0.0)
+                if title not in found_hits or dist < found_hits[title].distance_m:
+                    found_hits[title] = GeoHit(title, point, dist)  # two points: the nearest
+            geo_hits[subject] = sorted(found_hits.values(), key=lambda g: (g.distance_m, g.title))
+
+        accepted_by_subject: dict[Place, list[Any]] = {}
+        for subject in subjects:
+            # The city's own name says nothing about which place a file shows: "Narmada in
+            # Omkareshwar" is not "Omkareshwar Shiva Temple". Those words never count as a match.
+            city_words = place_words(str(cities[subject.owner].get("title") or ""), selection)
+            others = [
+                OtherPlace(p.point, place_words(p.name, selection) - city_words)
+                for p in places_by_city[subject.owner]
+                if p.point and (p.page_id, p.ordinal) != (subject.page_id, subject.ordinal)
+            ] + [
+                OtherPlace(
+                    (item.coordinate.lat, item.coordinate.lon),
+                    place_words(item.label or "", selection) - city_words,
+                )
+                for _, item, _, _ in provisional.get(subject.owner, [])
+                if item.coordinate
+            ]
+            accepted = accept_hits(
+                geo_hits.get(subject, []),
+                place_words(subject.name, selection) - city_words,
+                others,
+                rules,
+                selection,
+                hero,
+                geosearch_skipped,
+            )
+            accepted_by_subject[subject] = accepted[: rules.max_photos_per_place * 3]
+        geo_titles = {a.hit.title for acc in accepted_by_subject.values() for a in acc}
+        infos: dict[str, FileInfo] = fetch_file_info(client, p18_titles | geo_titles, photo_rules)
+
+        for pid in searched_cities:
+            city = {**cities[pid]}
+            taken = 0
+            for qid, item, place_kind, centre_km in provisional[pid]:
+                if taken >= rules.max_per_city:
+                    places_skipped["over_city_cap"] += 1
+                    continue
+                title = f"File:{item.image}"
+                extra = _extra_row(
+                    city, qid, item, place_kind, centre_km, rules, dump_date, read_at
+                )
+                if infos[title].title.removeprefix("File:") in used_files:
+                    places_skipped["photo_already_used"] += 1
+                    continue
+                subject = Subject(
+                    pid,
+                    extra["ordinal"],
                     "listing",
-                    subject.listing_key,
-                    subject.country_iso,
-                    subject.qid,
-                    None,
-                ),
-                accepted.hit.title,
-                "commons_geosearch",
-            )
-            if row is None:
-                photos_failed[problem] += 1
-                continue
-            kept_rows += 1
-            candidate_rows.append(
-                {
-                    **row,
-                    "subject_name": subject.name,
-                    "nearby_source": "commons_geosearch",
-                    "nearby_distance_m": round(accepted.hit.distance_m, 1),
-                    "nearby_named": accepted.named,
-                    "nearby_rules_version": rules.version,
-                }
-            )
-        with_candidate += kept_rows > 0
+                    extra["listing_key"],
+                    city.get("tree_country_iso"),
+                    qid,
+                    item.image,
+                )
+                row, problem = checked_row(infos, subject, title, "wikidata_p18")
+                if row is None:
+                    places_skipped[f"photo_{problem}"] += 1
+                    continue
+                used_files.add(row["commons_file"])
+                taken += 1
+                place_rows.append(extra)
+                candidate_rows.append(
+                    {
+                        **row,
+                        "subject_name": item.label,
+                        "nearby_source": "wikidata_item",
+                        "nearby_distance_m": None,
+                        "nearby_named": None,
+                        "nearby_rules_version": rules.version,
+                    }
+                )
+
+        for subject in subjects:
+            kept_rows = 0
+            for accepted in accepted_by_subject[subject]:
+                if kept_rows >= rules.max_photos_per_place:
+                    break
+                info = infos[accepted.hit.title]
+                if info.title.removeprefix("File:") in used_files:
+                    geosearch_skipped["photo_of_another_place"] += 1
+                    continue
+                row, problem = checked_row(
+                    infos,
+                    Subject(
+                        subject.page_id,
+                        subject.ordinal,
+                        "listing",
+                        subject.listing_key,
+                        subject.country_iso,
+                        subject.qid,
+                        None,
+                    ),
+                    accepted.hit.title,
+                    "commons_geosearch",
+                )
+                if row is None:
+                    photos_failed[problem] += 1
+                    continue
+                kept_rows += 1
+                candidate_rows.append(
+                    {
+                        **row,
+                        "subject_name": subject.name,
+                        "nearby_source": "commons_geosearch",
+                        "nearby_distance_m": round(accepted.hit.distance_m, 1),
+                        "nearby_named": accepted.named,
+                        "nearby_rules_version": rules.version,
+                    }
+                )
+            with_candidate += kept_rows > 0
+
+    # Closest to ready first; no new chunk once the budget is spent (the cities left keep their
+    # first-pass photos, and the next run, with the cache, gets to them).
+    ordered = city_order(short, pass_one.places, pass_one.hero, has_summary, readiness)
+    deadline = (started_at if started_at is not None else clock()) + rules.budget_minutes * 60
+    not_reached: list[int] = []
+    progress = Progress("Short cities", len(ordered))
+    for first in range(0, len(ordered), rules.chunk_cities):
+        if clock() >= deadline:
+            not_reached = ordered[first:]
+            break
+        chunk = ordered[first : first + rules.chunk_cities]
+        process(chunk)
+        progress.advance(len(chunk))
+    progress.done()
 
     target = out_dir / (f"{dump_date}-{country_filter}" if country_filter else dump_date)
     place_rows.sort(key=lambda r: (r["page_id"], r["ordinal"]))
@@ -788,7 +850,10 @@ def run_nearby(
         "extra_places": len(place_rows),
         "cities_with_extra_places": len({r["owner_page_id"] for r in place_rows}),
         "geosearch_enabled": rules.geosearch_enabled,
-        "subjects": len(subjects),
+        "budget_minutes": rules.budget_minutes,
+        "cities_reached": len(ordered) - len(not_reached),
+        "cities_not_reached": len(not_reached),
+        "subjects": len(all_subjects),
         "subjects_with_candidate": with_candidate,
         "candidate_rows": len(candidate_rows),
         "searches_busy": search.busy,
@@ -810,6 +875,9 @@ def run_nearby(
             "photo_candidates_manifest_sha256": candidates_manifest,
             "inputs_sha256": dict(sorted(inputs.items())),
             "totals": totals,
+            # Short cities not started before the time budget ran out: they got nothing new, and
+            # readiness does not count that against them (see readiness's keep_not_reached).
+            "cities_not_reached": sorted(not_reached),
             "outputs_sha256": {
                 name: hashlib.sha256((target / name).read_bytes()).hexdigest()
                 for name in OUTPUT_FILES

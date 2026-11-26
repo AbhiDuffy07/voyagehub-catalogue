@@ -5,7 +5,7 @@
 # file (the "short" line is config/readiness_rules.toml's min_photographed_places). Change a value
 # only together with its reason, and bump rules_version (rows carry it).
 
-rules_version = 3
+rules_version = 4
 
 [geosearch]
 # false: no Commons geosearch at all; only Wikidata extra places (step 1) add photographed places.
@@ -66,3 +66,15 @@ Prices and hours are never filled: an extra place has none, flagged unknown."""
 [cache]
 # Successful API replies are kept under out/cache/ and reused for this many days.
 max_age_days = 30
+
+[budget]
+# No new chunk of cities is started this many minutes after the job started (--started-at; the CI
+# job's own limit is 345 minutes, the rest is for the last chunk, the output and the cache save).
+minutes = 300
+# Cities handled together (searches, item batches, file checks) between two looks at the clock.
+chunk_cities = 25
+reason = """Owner request 2026-11-26: a world run (about 18,500 short cities, about 48,000 \
+requests) does not fit one job, so nearby stops starting work at its budget, writes what it has \
+and lists the cities it did not reach; the cache, kept between CI runs, lets the next run continue. \
+Rules version 4: cities are handled closest to ready first instead of by page id, which can change \
+which of two cities gets a photo both want."""

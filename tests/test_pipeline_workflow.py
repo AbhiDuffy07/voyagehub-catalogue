@@ -113,3 +113,48 @@ def test_the_nearby_folder_reaches_photo_select_readiness_and_publish():
     )
     assert "CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}" in nearby
     assert "!out/cache" in nearby  # the cache stays out of the hand-over artifact
+
+
+CACHE_SHA = "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+CACHE_PREFIX = "nearby-cache-${{ env.DUMP_DATE }}-r${{ steps.nearby-rules.outputs.version }}-"
+
+
+def _step(block, uses):
+    start = block.index(f"uses: {uses}")
+    return block[start : block.find("\n      - ", start) % (len(block) + 1)]
+
+
+def test_nearby_restores_and_saves_its_cache_with_a_dump_and_rules_key():
+    nearby = job_blocks()["nearby"]
+    restore = _step(nearby, f"actions/cache/restore@{CACHE_SHA} # v6.1.0")
+    save = _step(nearby, f"actions/cache/save@{CACHE_SHA} # v6.1.0")
+    key = f"key: {CACHE_PREFIX}${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}"
+    for step in (restore, save):
+        assert "path: out/cache" in step
+        assert key in step
+        assert "COUNTRY" not in step and "inputs.country" not in step
+    assert f"restore-keys: {CACHE_PREFIX}\n" in restore
+    assert "if: always()" in save
+    assert "id: nearby-rules" in nearby
+    assert "load_nearby_rules().version" in nearby
+    run_at = nearby.index("python -m catalogue nearby ")
+    assert nearby.index("id: nearby-rules") < nearby.index(restore) < run_at < nearby.index(save)
+
+
+def test_nearby_logs_free_disk_around_the_cache_so_a_world_size_cache_is_measured():
+    nearby = job_blocks()["nearby"]
+    restore = nearby.index("actions/cache/restore@")
+    save = nearby.index("actions/cache/save@")
+    disk = [m.start() for m in re.finditer(r"df -h / out", nearby)]
+    assert len(disk) == 2
+    assert disk[0] < restore and nearby.index("python -m catalogue nearby ") < disk[1] < save
+    assert "du -sh out/cache" in nearby
+
+
+def test_nearby_gets_the_job_start_time():
+    nearby = job_blocks()["nearby"]
+    started = nearby.index('echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"')
+    assert started < nearby.index("actions/setup-python")  # the first step after checkout
+    line = next(ln for ln in nearby.splitlines() if "python -m catalogue nearby " in ln)
+    assert started < nearby.index(line)
+    assert '--started-at "$JOB_STARTED"' in line

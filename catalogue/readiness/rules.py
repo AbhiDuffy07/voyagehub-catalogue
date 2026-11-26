@@ -8,6 +8,7 @@ unpublished only after `unpublish_after_failed_runs` not-ready runs in a row.
 """
 
 import tomllib
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Any
 from catalogue.errors import PipelineError
 from catalogue.photos.select import _strings, _table
 from catalogue.prices.pricing import _whole
+from catalogue.publish.build import photo_of
+from catalogue.publish.hero import HeroRules, hero_problem
 
 READINESS_RULES_PATH = (
     Path(__file__).resolve().parent.parent.parent / "config" / "readiness_rules.toml"
@@ -103,11 +106,20 @@ class CityState:
 
 
 def decide_publication(
-    previous: CityState | None, *, ready: bool, rules: ReadinessRules, has_slug: bool = True
+    previous: CityState | None,
+    *,
+    ready: bool,
+    rules: ReadinessRules,
+    has_slug: bool = True,
+    not_reached: bool = False,
 ) -> tuple[CityState, str]:
     """The city's new state and what happened: publish, keep, keep_pending_unpublish, unpublish,
     blocked_no_slug (ready, but the static page needs a slug and slugs are assigned only in a
-    reviewed discover wave) or none."""
+    reviewed discover wave), keep_not_reached or none.
+
+    `not_reached`: nearby ran out of time before this city, and only rules nearby could have fixed
+    are failing. A published city then keeps its state exactly (the failed-run count is neither
+    raised nor reset), because this run says nothing new about it."""
     was_published = previous is not None and previous.published
     if ready:
         if not was_published and not has_slug:
@@ -115,6 +127,8 @@ def decide_publication(
         return CityState(True, 0), ("keep" if was_published else "publish")
     if not was_published:
         return CityState(False, 0), "none"
+    if not_reached and previous is not None:
+        return CityState(True, previous.failed_runs), "keep_not_reached"
     failed = previous.failed_runs + 1 if previous is not None else 1
     if failed >= rules.unpublish_after_failed_runs:
         return CityState(False, failed), "unpublish"
@@ -132,3 +146,44 @@ def place_owners(
         for r in rows
         if r["kind"] in wanted and not r["duplicate_of"] and (r.get("name") or "").strip()
     }
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCounts:
+    places: Counter[int]  # photographed places per city
+    hero: Counter[int]  # hero photos per city (the city's own photo and its places' photos)
+    counted: frozenset[tuple[int, int]]  # the places counted in `places`
+    unowned: int  # place photos of listings that are no city's place
+
+
+def photo_counts(
+    rows: Iterable[Mapping[str, Any]],
+    owners: Mapping[tuple[int, int], int],
+    hero: HeroRules,
+) -> PhotoCounts:
+    """Photographed places and hero photos per city, with the very predicates publish-static uses:
+    a photo it would leave out (no credit, a bad author) is no photographed place, and a photo
+    that may not be a hero (size, rejection lists, collage name, author) is no hero. Readiness and
+    `nearby` both count with this, so they cannot disagree."""
+    places: Counter[int] = Counter()
+    heroes: Counter[int] = Counter()
+    counted: set[tuple[int, int]] = set()
+    unowned = 0
+    for r in rows:
+        if not r.get("photo"):
+            continue
+        row = dict(r)
+        is_article = row["subject"] == "article"
+        key = (row["page_id"], row["ordinal"])
+        owner = row["page_id"] if is_article else owners.get(key)
+        if owner is None:
+            unowned += 1  # a photo of a listing that is not a place (or has no name)
+            continue
+        published = photo_of(row, Counter(), hero) is not None
+        if not is_article:
+            if not published:
+                continue  # publish-static leaves it out, so it is no photographed place
+            places[owner] += 1
+            counted.add(key)
+        heroes[owner] += published and hero_problem(row, hero) is None
+    return PhotoCounts(places, heroes, frozenset(counted), unowned)

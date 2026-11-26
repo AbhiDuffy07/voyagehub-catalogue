@@ -5,6 +5,7 @@ import json
 import pytest
 
 from catalogue.errors import PipelineError
+from catalogue.nearby.inputs import verify_nearby
 from catalogue.nearby.run import EXTRA_ORDINAL_BASE
 from catalogue.publish.run import run_publish_static
 from catalogue.readiness.run import run_readiness
@@ -36,13 +37,13 @@ def extra_place(owner, ordinal, name):
     }
 
 
-def write_nearby(root, places, country="IN"):
+def write_nearby(root, places, country="IN", **extra):
     folder = root / "nearby"
     files = {
         "nearby_places.jsonl": rf.jsonl(folder / "nearby_places.jsonl", places),
         "nearby_candidates.jsonl": rf.jsonl(folder / "nearby_candidates.jsonl", []),
     }
-    rf.manifest(folder, files, country=country, photo_candidates_manifest_sha256="x")
+    rf.manifest(folder, files, country=country, photo_candidates_manifest_sha256="x", **extra)
     return folder
 
 
@@ -133,6 +134,87 @@ def test_a_nearby_folder_photo_select_never_saw_is_refused(tmp_path):
     with pytest.raises(PipelineError) as raised:
         run_readiness(**kwargs, nearby_folder=nearby)
     assert "photo-select" in str(raised.value)
+
+
+# --- cities nearby did not reach for time -------------------------------------------------------
+
+
+def _published_once_failed(tmp_path):
+    """A first readiness run where Jaipur publishes, then its state says it failed once."""
+    first, _ = rf.run(tmp_path, tag="1")
+    state_path = first.output_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["cities"]["1"] = {"published": True, "failed_runs": 1}
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    return first.output_dir
+
+
+def _second_run(tmp_path, previous, not_reached, **build):
+    # Jaipur loses a photographed place (author rule), so it fails photographed_places.
+    kwargs = rf.build(tmp_path, tag="2", bad_author=((1, 1),), **build)
+    nearby = write_nearby(kwargs["photos_folder"].parent, [], cities_not_reached=list(not_reached))
+    add_photos(kwargs["photos_folder"], [], nearby)
+    return run_readiness(**kwargs, nearby_folder=nearby, previous_folder=previous)
+
+
+def test_readiness_holds_a_city_nearby_skipped_for_time(tmp_path):
+    result = _second_run(tmp_path, _published_once_failed(tmp_path), [1])
+    jaipur = rf.rows(result)[1]
+    assert jaipur["failed_rules"] == ["photographed_places"]
+    assert (jaipur["publish_action"], jaipur["published"], jaipur["failed_runs"]) == (
+        "keep_not_reached",
+        True,
+        1,
+    )
+    assert result.totals["keep_not_reached"] == 1
+    assert "not reached by nearby for time" in (result.output_dir / "report.md").read_text("utf-8")
+    assert "kept, not reached by nearby 1" in result.summary()
+
+
+def test_a_city_reached_by_nearby_that_fails_is_counted_as_today(tmp_path):
+    jaipur = rf.rows(_second_run(tmp_path, _published_once_failed(tmp_path), []))[1]
+    assert (jaipur["publish_action"], jaipur["published"], jaipur["failed_runs"]) == (
+        "unpublish",
+        False,
+        2,
+    )
+
+
+def test_a_city_not_reached_that_also_lacks_a_summary_is_counted_as_today(tmp_path):
+    result = _second_run(tmp_path, _published_once_failed(tmp_path), [1], summaries=(2, 5))
+    jaipur = rf.rows(result)[1]
+    assert set(jaipur["failed_rules"]) == {"summary", "photographed_places"}
+    assert (jaipur["publish_action"], jaipur["published"], jaipur["failed_runs"]) == (
+        "unpublish",
+        False,
+        2,
+    )
+    assert result.totals["keep_not_reached"] == 0
+
+
+def test_a_nearby_manifest_without_the_list_means_every_city_was_reached(tmp_path):
+    kwargs = rf.build(tmp_path)
+    root = kwargs["photos_folder"].parent
+    nearby = write_nearby(root, [])  # a manifest from before the list existed
+    assert verify_nearby(nearby, "IN").cities_not_reached == frozenset()
+    add_photos(kwargs["photos_folder"], [], nearby)
+    without = run_readiness(**kwargs, nearby_folder=nearby)
+    write_nearby(root, [], cities_not_reached=[])
+    with_list = run_readiness(**{**kwargs, "out_dir": tmp_path / "again"}, nearby_folder=nearby)
+    assert rf.rows(without) == rf.rows(with_list)
+
+
+def test_a_manifest_naming_the_cities_returns_them(tmp_path):
+    nearby = write_nearby(tmp_path, [], cities_not_reached=[3, 1])
+    assert verify_nearby(nearby, "IN").cities_not_reached == frozenset({1, 3})
+
+
+@pytest.mark.parametrize("bad", ["1", [1, "2"], [True], {"1": 1}, None])
+def test_a_damaged_not_reached_list_is_refused(tmp_path, bad):
+    nearby = write_nearby(tmp_path, [], cities_not_reached=bad)
+    with pytest.raises(PipelineError) as raised:
+        verify_nearby(nearby, "IN")
+    assert "damaged" in str(raised.value)
 
 
 # --- publish ------------------------------------------------------------------------------------

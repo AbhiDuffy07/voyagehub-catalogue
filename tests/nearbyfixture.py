@@ -27,6 +27,13 @@ JAIPUR = (26.92, 75.82)
 AMER = (26.985, 75.851)
 
 
+def clock_by_requests(*seen: list, start: float = 1_000_000.0):
+    """A clock that moves one hour per request in the given lists (pass the Wikidata `seen` list:
+    those requests are cached, so a rerun answered from the cache costs no time), so a test can say
+    exactly how far a run gets within its budget."""
+    return lambda: start + 3600 * sum(len(s) for s in seen)
+
+
 def geo_on() -> NearbyRules:
     """The committed rules with Commons geosearch switched on: the mechanism stays tested while
     the committed rules keep it off (owner ruling 2026-11-25)."""
@@ -103,7 +110,7 @@ def selected(pid, ordinal, subject="listing", photo=PHOTO, hero=False):
     }
 
 
-def build(tmp_path: Path, *, world=False, listing_facts=()):
+def build(tmp_path: Path, *, world=False, listing_facts=(), summaries=(1, 2, 3)):
     root = tmp_path / ("world" if world else "india")
     country = None if world else "IN"
     articles = [
@@ -221,12 +228,25 @@ def build(tmp_path: Path, *, world=False, listing_facts=()):
             },
         },
     )
+    sums = root / "summaries"
+    summary_rows = [
+        {"subject": "article", "page_id": pid, "ordinal": 0, "summary": "Text."}
+        for pid in summaries
+    ]
+    write_manifest(
+        sums,
+        {
+            "country_filter": country,
+            "outputs_sha256": {"summaries.jsonl": jsonl(sums / "summaries.jsonl", summary_rows)},
+        },
+    )
     return {
         "discover_folder": discover,
         "listings_folder": lis,
         "enrich_folder": enrich,
         "photos_folder": photos,
         "selection_folder": sel,
+        "summaries_folder": sums,
         "out_dir": root / "out",
         "cache_dir": root / "cache",
         "dump_date": "20261101",

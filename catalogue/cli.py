@@ -199,10 +199,16 @@ def _parser() -> argparse.ArgumentParser:
         ("--enrich-dir", "out/enrich", "where enrich-wikidata wrote"),
         ("--photos-dir", "out/photos", "where photo-candidates wrote"),
         ("--selection-dir", "out/photo_selection_first", "where the first photo-select wrote"),
+        ("--summaries-dir", "out/summaries", "where wikipedia-summary wrote"),
         ("--cache-dir", "out/cache", "where API replies are cached"),
     ):
         nearby.add_argument(flag, type=Path, default=Path(default), help=help_text)
     nearby.add_argument("--out-dir", type=Path, default=Path("out/nearby"))
+    nearby.add_argument(
+        "--started-at",
+        type=int,
+        help="when the job started, in epoch seconds (default now): the time budget counts from it",
+    )
 
     blocks = commands.add_parser(
         "draft-blocks",
@@ -587,11 +593,13 @@ def _nearby(
             enrich_folder=args.enrich_dir / folder,
             photos_folder=args.photos_dir / folder,
             selection_folder=args.selection_dir / folder,
+            summaries_folder=args.summaries_dir / folder,
             out_dir=args.out_dir,
             cache_dir=args.cache_dir,
             dump_date=args.dump_date,
             today=datetime.now(UTC).date(),
             country_iso=args.country,
+            started_at=args.started_at,
         )
     finally:
         client.close()
