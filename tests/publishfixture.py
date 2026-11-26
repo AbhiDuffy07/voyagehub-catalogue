@@ -83,6 +83,8 @@ def build(tmp_path: Path) -> dict:
         {
             "page_id": 1,
             "page_title": "Jaipur",
+            "country": "India",
+            "country_iso": "IN",
             "section_key": "get_around",
             "ordinal": 3,
             "section_heading": "Get around",
@@ -96,6 +98,8 @@ def build(tmp_path: Path) -> dict:
         {
             "page_id": 2,
             "page_title": "Agra",
+            "country": "India",
+            "country_iso": "IN",
             "section_key": "get_around",
             "ordinal": 3,
             "section_heading": "Get around",

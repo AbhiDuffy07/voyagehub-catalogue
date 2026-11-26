@@ -771,6 +771,17 @@
       ],
       "title": "Country Iso"
     },
+    "country_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Country Name"
+    },
     "days": {
       "items": {
         "$ref": "#/$defs/Day"
@@ -854,6 +865,7 @@
     "slug",
     "title",
     "country_iso",
+    "country_name",
     "tier",
     "summary",
     "hero",

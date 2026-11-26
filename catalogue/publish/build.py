@@ -4,6 +4,7 @@ Nothing is guessed: a missing value stays empty. A photo or summary without a li
 left out and counted, because every published photo and summary must keep author, licence and link.
 """
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -65,10 +66,27 @@ class Upstream:
     counts: Counter = field(default_factory=Counter)
     stop_listings: dict[str, dict[str, Any]] = field(default_factory=dict)  # by listing_key
     sections: dict[int, dict[str, Any]] = field(default_factory=dict)  # "Get around", by page id
+    country_names: dict[str, str] = field(default_factory=dict)  # by ISO code, see country_names_of
     ride_apps: dict[str, dict[str, Any]] = field(default_factory=load_ride_apps)
     hero_rules: HeroRules = field(default_factory=load_hero_rules)
     content_rules: ContentRules = field(default_factory=load_content_rules)
     summary_rules: SummaryRules = field(default_factory=load_summary_rules)
+
+
+_DISAMBIGUATOR = re.compile(r"\s*\([^()]*\)$")
+
+
+def country_names_of(rows: Any) -> tuple[dict[str, str], int]:
+    """ISO code to the Wikivoyage country title of the pages (fetch-listings section rows), without
+    a trailing disambiguator ("Georgia (country)" is "Georgia"). A code seen with two different
+    names gets none (never guessed); the second value counts those codes."""
+    seen: dict[str, set[str]] = {}
+    for row in rows:
+        iso, name = row.get("country_iso"), row.get("country")
+        if isinstance(iso, str) and iso and isinstance(name, str) and name.strip():
+            seen.setdefault(iso, set()).add(_DISAMBIGUATOR.sub("", name.strip()))
+    names = {iso: next(iter(found)) for iso, found in seen.items() if len(found) == 1}
+    return names, len(seen) - len(names)
 
 
 def _https(*urls: Any) -> bool:
@@ -302,6 +320,7 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         "slug": row["slug"],
         "title": row["title"],
         "country_iso": row.get("country_iso"),
+        "country_name": up.country_names.get(row.get("country_iso") or ""),
         "tier": row["tier"],
         "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts, up.summary_rules),
         "hero": hero,

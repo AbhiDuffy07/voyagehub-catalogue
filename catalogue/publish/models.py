@@ -129,6 +129,7 @@ class CityFile(_Model):
     slug: str = Field(pattern=SLUG)
     title: str
     country_iso: str | None
+    country_name: str | None  # the Wikivoyage country title, e.g. "India"
     tier: Tier
     summary: Text | None
     hero: Photo | None
@@ -144,6 +145,7 @@ class IndexCity(_Model):
     slug: str = Field(pattern=SLUG)
     title: str
     country_iso: str | None
+    country_name: str | None
     tier: Tier
     hero: Photo | None
     file: str
@@ -151,6 +153,7 @@ class IndexCity(_Model):
 
 class IndexShard(_Model):
     country_iso: str | None
+    country_name: str | None
     file: str
     cities: int
 

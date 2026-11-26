@@ -335,3 +335,22 @@ def test_a_paragraph_without_any_sentence_end_is_still_judged_by_its_length():
     rules = load_content_rules()
     text = "Autos and app cabs are everywhere in the city centre and near stations"
     assert excerpt_of(text, rules) == text
+
+
+# --- country names ----------------------------------------------------------------------------
+
+
+def test_country_names_come_from_the_wikivoyage_country_of_each_page():
+    rows = [
+        {"country_iso": "IN", "country": "India"},
+        {"country_iso": "IN", "country": "India"},
+        {"country_iso": "GE", "country": "Georgia (country)"},  # a Wikivoyage disambiguator
+        {"country_iso": None, "country": None},
+    ]
+    names, conflicts = b.country_names_of(rows)
+    assert names == {"IN": "India", "GE": "Georgia"} and conflicts == 0
+
+
+def test_a_code_with_two_different_names_gets_none_and_is_counted():
+    rows = [{"country_iso": "XK", "country": "Kosovo"}, {"country_iso": "XK", "country": "Other"}]
+    assert b.country_names_of(rows) == ({}, 1)

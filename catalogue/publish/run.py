@@ -82,6 +82,8 @@ class PublishResult:
                 f"thin cities: {t['without_hero']} without a hero photo, "
                 f"{t['without_summary']} without a summary, {t['not_ready_published']} "
                 "published but not ready now",
+                f"country names: missing for {t['without_country_name']} cities "
+                f"({t['country_name_conflicts']} codes with two names)",
                 f"photos {t['photos']}, summaries {t['summaries']}; left out for missing credit: "
                 f"{t['photos_left_out_no_credit']} photos, "
                 f"{t['photos_left_out_bad_author']} photos (author rule), "
@@ -307,13 +309,11 @@ def run_publish_static(
             for r in _rows(listings_folder / LISTINGS_FILE)
             if r.get("listing_key") in stop_keys
         }
+        page_rows = [r for r in _rows(listings_folder / SECTIONS_FILE) if r["page_id"] in wanted]
+        country_names, counts["country_name_conflicts"] = build.country_names_of(page_rows)
         sections: dict[int, dict[str, Any]] = {}
         for r in sorted(
-            (
-                r
-                for r in _rows(listings_folder / SECTIONS_FILE)
-                if r["section_key"] == "get_around" and r["page_id"] in wanted
-            ),
+            (r for r in page_rows if r["section_key"] == "get_around"),
             key=lambda r: r["ordinal"],
         ):
             sections.setdefault(r["page_id"], r)  # a page's first "Get around" heading
@@ -333,6 +333,7 @@ def run_publish_static(
         counts=counts,
         stop_listings=stop_listings,
         sections=sections,
+        country_names=country_names,
     )
     files: dict[str, bytes] = {}
     index_cities: list[dict[str, Any]] = []
@@ -355,6 +356,7 @@ def run_publish_static(
                 "slug": city["slug"],
                 "title": city["title"],
                 "country_iso": city["country_iso"],
+                "country_name": city["country_name"],
                 "tier": city["tier"],
                 "hero": city["hero"],
                 "file": f"{API}/{name}",
@@ -455,6 +457,10 @@ def run_publish_static(
         "with_ride_apps": counts["with_ride_apps"],
         "getting_around_left_out_no_credit": counts["getting_around_left_out_no_credit"],
         "without_summary": counts["without_summary"],
+        "without_country_name": sum(
+            1 for c in index_cities if c["country_iso"] and not c["country_name"]
+        ),
+        "country_name_conflicts": counts["country_name_conflicts"],
         "not_ready_published": counts["not_ready_published"],
         "cities": len(index_cities),
         "skipped_no_slug": counts["skipped_no_slug"],

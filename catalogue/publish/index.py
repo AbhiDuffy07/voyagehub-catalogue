@@ -45,7 +45,14 @@ def index_files(cities: list[dict[str, Any]], max_bytes: int) -> dict[str, bytes
                 "a country is too large for one index file"
             )
         files[name] = data
-        shards.append({"country_iso": iso, "file": f"{API}/{name}", "cities": len(by_country[iso])})
+        shards.append(
+            {
+                "country_iso": iso,
+                "country_name": by_country[iso][0].get("country_name"),
+                "file": f"{API}/{name}",
+                "cities": len(by_country[iso]),
+            }
+        )
     top = dump_document(
         IndexFile, {"schema_version": SCHEMA_VERSION, "shards": shards}, "index.json"
     )

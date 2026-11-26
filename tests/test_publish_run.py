@@ -38,6 +38,10 @@ def test_city_file_has_summary_credit_timezone_and_tier(tmp_path):
     assert credit["licence"] == "CC BY-SA 4.0"
     assert credit["source_url"].startswith("https://en.wikipedia.org/")
     assert city["timezone"] == {"name": "Asia/Kolkata", "basis": "coordinates"}
+    assert city["country_iso"] == "IN" and city["country_name"] == "India"
+    assert result.totals["without_country_name"] == 0
+    assert result.totals["country_name_conflicts"] == 0
+    assert "country names: missing for 0 cities" in result.summary()
 
 
 def test_every_photo_keeps_author_licence_and_link(tmp_path):
@@ -85,6 +89,7 @@ def test_index_lists_cities_with_hero_and_tier(tmp_path):
     by_slug = {c["slug"]: c for c in index["cities"]}
     assert set(by_slug) == {"jaipur", "agra"}
     assert by_slug["agra"]["tier"] == "browse_only"
+    assert by_slug["agra"]["country_name"] == "India"
     assert by_slug["jaipur"]["hero"]["thumb_url"] == "https://thumb.example/X.jpg"
     assert by_slug["jaipur"]["hero"]["credit"]["author"] == "Gerd Eichmann"
 
