@@ -24,6 +24,7 @@ def layout(tmp_path):
         ("enrich_folder", "enrich", "20261101-IN"),
         ("photos_folder", "photos", "20261101-IN"),
         ("selection_folder", "selection", "20261101-IN"),
+        ("summaries_folder", "summaries", "20261101-IN"),
     ):
         target = base / name / folder
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,8 @@ def args(base, *extra):
         str(base / "photos"),
         "--selection-dir",
         str(base / "selection"),
+        "--summaries-dir",
+        str(base / "summaries"),
         "--cache-dir",
         str(base / "cache"),
         "--out-dir",
@@ -67,6 +70,7 @@ def test_nearby_then_photo_select_with_the_nearby_folder(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0, out
     assert "short of photographed places: 1" in out and EMAIL not in out
+    assert "cities done: 1 of 1; skipped for time: 0" in out
     folder = base / "nearby" / "20261101-IN"
     assert (folder / "nearby_places.jsonl").is_file()
     assert list((base / "cache").rglob("*.json"))

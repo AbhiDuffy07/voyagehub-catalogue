@@ -5,6 +5,7 @@ import pytest
 import respx
 
 from catalogue.errors import PipelineError
+from catalogue.nearby.inputs import verify_nearby
 from catalogue.nearby.rules import load_nearby_rules
 from catalogue.nearby.run import EXTRA_ORDINAL_BASE, run_nearby
 from tests.nearbyfixture import (
@@ -12,6 +13,7 @@ from tests.nearbyfixture import (
     HAWA,
     WIKIDATA,
     build,
+    clock_by_requests,
     fake_commons_api,
     fake_wikidata_api,
     geo_on,
@@ -211,7 +213,9 @@ def test_the_manifest_records_inputs_rules_and_outputs(client, tmp_path):
         "destination_facts.jsonl",
         "listing_facts.jsonl",
         "photo_selection.jsonl",
+        "summaries.jsonl",
     }
+    assert manifest["cities_not_reached"] == []
     for name, digest in manifest["outputs_sha256"].items():
         assert sha(result.output_dir / name) == digest
     assert manifest["totals"]["short_cities"] == 1
@@ -355,3 +359,75 @@ def test_with_geosearch_off_no_commons_search_runs_and_extra_places_still_come(c
     assert "Commons geosearch: off" in (result.output_dir / "report.md").read_text("utf-8")
     assert "Commons geosearch: off" in result.summary()
     assert "places searched on Commons" in run(client, build(tmp_path / "on")).summary()
+
+
+# --- time budget (world-safe nearby) ------------------------------------------------------------
+
+JAIPUR_SEARCH = "26.920000|75.820000"
+
+
+def _budget(chunk=1, minutes=60):
+    return replace(geo_on(), chunk_cities=chunk, budget_minutes=minutes)
+
+
+def _manifest(result):
+    return json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+
+
+@respx.mock
+def test_past_the_budget_no_new_city_is_started_and_outputs_are_complete(client, tmp_path):
+    wd = []
+    result = run(
+        client, build(tmp_path, world=True), wd, rules=_budget(), clock=clock_by_requests(wd)
+    )
+    # Jaipur misses 2 photographed places, Springfield 3: Jaipur goes first, then time is up.
+    assert _manifest(result)["cities_not_reached"] == [3]
+    places = rows(result.output_dir / "nearby_places.jsonl")
+    assert places and {p["owner_page_id"] for p in places} == {1}
+    verify_nearby(result.output_dir, None)
+    assert result.totals["cities_reached"] == 1 and result.totals["cities_not_reached"] == 1
+    assert "skipped for time: 1" in (result.output_dir / "report.md").read_text("utf-8")
+    assert "skipped for time: 1" in result.summary()
+
+
+@respx.mock
+def test_a_rerun_reaches_further_because_cached_answers_cost_no_time(client, tmp_path):
+    folders = build(tmp_path, world=True)
+    wd = []
+    run(client, folders, wd, rules=_budget(), clock=clock_by_requests(wd))
+    wd2 = []
+    again = run(client, folders, wd2, rules=_budget(), clock=clock_by_requests(wd2))
+    assert again.totals["cities_not_reached"] == 0
+    assert _manifest(again)["cities_not_reached"] == []
+    assert not [p for p in wd2 if p.get("gscoord") == JAIPUR_SEARCH]  # Jaipur: from the cache
+
+
+@respx.mock
+def test_a_budget_spent_before_the_first_city_reaches_none_and_still_writes_valid_outputs(
+    client, tmp_path
+):
+    wd, now = [], 1_000_000.0
+    result = run(
+        client,
+        build(tmp_path, world=True),
+        wd,
+        rules=_budget(),
+        clock=lambda: now,
+        started_at=now - 61 * 60,
+    )
+    assert result.totals["cities_reached"] == 0 and result.totals["cities_not_reached"] == 2
+    assert _manifest(result)["cities_not_reached"] == [1, 3]
+    assert rows(result.output_dir / "nearby_places.jsonl") == []
+    assert rows(result.output_dir / "nearby_candidates.jsonl") == []
+    verify_nearby(result.output_dir, None)
+    assert wd == []
+
+
+@respx.mock
+def test_cities_are_processed_in_priority_order(client, tmp_path):
+    # Jaipur has no summary, so it cannot become ready this run: Springfield (a higher page id)
+    # goes first although it misses more places.
+    wd = []
+    folders = build(tmp_path, world=True, summaries=(2, 3))
+    result = run(client, folders, wd, rules=_budget(), clock=clock_by_requests(wd))
+    assert _manifest(result)["cities_not_reached"] == [1]
