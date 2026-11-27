@@ -3,10 +3,10 @@
 Reads the hash-checked outputs of earlier jobs for one dump and country filter, and writes
 `out/publish/<date>[-CC]/site/` (the folder that is deployed): `v1/cities/<slug>.json`,
 `v1/index.json`, `v1/attributions.json` (credits in `v1/attributions/part-NNN.json`),
-`v1/manifest.json` (version and hashes), `_headers`, a landing page `index.html` and a `404.html`. A
-city is written only when readiness says published and it has a slug. Every file is validated against its
-pydantic model and size-checked before anything is written. Offline and deterministic. Error
-messages name files only (the logs are public).
+`v1/manifest.json` (version and hashes), `_headers`, a landing page `index.html` and a
+`404.html`. A city is written only when readiness says published and it has a slug. Every file is
+validated against its pydantic model and size-checked before anything is written. Offline and
+deterministic. Error messages name files only (the logs are public).
 """
 
 import hashlib
