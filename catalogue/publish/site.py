@@ -41,6 +41,32 @@ a { color: LinkText; }
 </body>
 </html>
 """
+# The answer for any path the site does not have. Without a top-level 404.html, Cloudflare Pages
+# treats the site as a single-page app and answers every unknown path with index.html and status
+# 200, so a missing city file would look like a page. With it, unknown paths get this page and 404.
+# Same rules as LANDING_PAGE: plain HTML, no script, written exactly as here, checked by deploy.
+NOT_FOUND_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Not found - VoyageHub catalogue</title>
+<style>
+body { font: 1rem/1.5 system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }
+a { color: LinkText; }
+</style>
+</head>
+<body>
+<h1>Not found</h1>
+<p>This file is not in the VoyageHub catalogue.</p>
+<p><a href="/">VoyageHub catalogue home</a></p>
+</body>
+</html>
+"""
+# The files at the site root beside v1/, each written exactly as here by the build and checked by
+# deploy.
+FIXED_FILES = {"_headers": HEADERS, "index.html": LANDING_PAGE, "404.html": NOT_FOUND_PAGE}
 # A published file name: lowercase, digits, and - _ . /; no leading dot or slash, no ".." part.
 FILE_NAME = re.compile(
     r"^[a-z0-9][a-z0-9_-]*(\.[a-z0-9_-]+)*(/[a-z0-9][a-z0-9_-]*(\.[a-z0-9_-]+)*)*$"

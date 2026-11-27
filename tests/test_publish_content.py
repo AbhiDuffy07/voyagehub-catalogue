@@ -3,6 +3,7 @@ and the getting_around field."""
 
 import json
 
+from catalogue.listings.wikitext import parse_page
 from catalogue.publish import build as b
 from catalogue.publish.getting_around import excerpt_of, load_content_rules, load_ride_apps
 from catalogue.publish.hero import hero_problem, load_hero_rules
@@ -193,12 +194,12 @@ def test_unphotographed_places_that_are_no_stop_stay_out(tmp_path):
 # --- getting around ---------------------------------------------------------------------------
 
 
-def test_ride_apps_come_from_config_by_country_with_names_and_links_only(tmp_path):
+def test_ride_apps_are_the_ones_whose_site_lists_the_city_with_names_and_links_only(tmp_path):
     result, _ = _build(tmp_path)
     apps = _city(result, "jaipur")["getting_around"]["ride_apps"]
-    assert [a["name"] for a in apps["apps"]] == ["Uber", "Ola", "Rapido", "Namma Yatri"]
+    assert [a["name"] for a in apps["apps"]] == ["Uber"]  # Namma Yatri lists Bengaluru only
     assert all(set(a) == {"name", "url"} and a["url"].startswith("https://") for a in apps["apps"])
-    assert apps["note"] == "Availability varies by city."
+    assert apps["note"] == "Availability varies within a city: check the app."
 
 
 def test_a_country_without_ride_apps_gets_none():
@@ -298,3 +299,58 @@ def test_a_damaged_section_row_gives_no_excerpt_instead_of_a_crash():
     around = b.build_city(CITY, up)["getting_around"]
     assert around["excerpt"] is None
     assert up.counts["getting_around_left_out_no_credit"] == 1
+
+
+# Real wikitext, Ahmedabad "Get around" (dump 20261101, revision 5389230), first paragraphs. The
+# stray "UTTAR PRADESH" is in the article itself.
+AHMEDABAD_GET_AROUND = """== Get around ==
+[[Image:Ahmedabad City Tourist Map.png|thumb|right|Tourist Map of Ahmedabad]]
+The services of AMTS and BRTS run from 6AM to 11PM.
+
+===By AMTS city bus===
+The local city buses are run by {{listing| name=Ahmedabad Municipal Transport Service | alt=AMTS \
+| wikipedia=Ahmedabad Municipal Transport Service | content= | wikidata=Q4696119 }} since 1947, \
+forming a wide network covering almost all the points of Ahmedabad. Any destination in the city \
+can be reached from anywhere in the city by AMTS.UTTAR PRADESH
+[[File:Ahmedabad AMTS Bus.JPG|thumbnail|300px|Older buses of AMTS]]
+"""
+
+
+def test_ahmedabad_excerpt_reads_cleanly_from_the_real_wikitext():
+    (section,) = parse_page(AHMEDABAD_GET_AROUND).sections
+    assert excerpt_of(section.text, load_content_rules()) == (
+        "The services of AMTS and BRTS run from 6AM to 11PM.\n\n"
+        "The local city buses are run by Ahmedabad Municipal Transport Service since 1947, "
+        "forming a wide network covering almost all the points of Ahmedabad."
+    )
+
+
+def test_a_paragraph_keeps_only_its_complete_sentences():
+    rules = load_content_rules()
+    text = "Buses are cheap and run often across town. Any stop works for AMTS.UTTAR PRADESH"
+    assert excerpt_of(text, rules) == "Buses are cheap and run often across town."
+
+
+def test_a_paragraph_without_any_sentence_end_is_still_judged_by_its_length():
+    rules = load_content_rules()
+    text = "Autos and app cabs are everywhere in the city centre and near stations"
+    assert excerpt_of(text, rules) == text
+
+
+# --- country names ----------------------------------------------------------------------------
+
+
+def test_country_names_come_from_the_wikivoyage_country_of_each_page():
+    rows = [
+        {"country_iso": "IN", "country": "India"},
+        {"country_iso": "IN", "country": "India"},
+        {"country_iso": "GE", "country": "Georgia (country)"},  # a Wikivoyage disambiguator
+        {"country_iso": None, "country": None},
+    ]
+    names, conflicts = b.country_names_of(rows)
+    assert names == {"IN": "India", "GE": "Georgia"} and conflicts == 0
+
+
+def test_a_code_with_two_different_names_gets_none_and_is_counted():
+    rows = [{"country_iso": "XK", "country": "Kosovo"}, {"country_iso": "XK", "country": "Other"}]
+    assert b.country_names_of(rows) == ({}, 1)

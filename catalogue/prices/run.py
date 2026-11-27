@@ -224,7 +224,9 @@ def _sample_text(
         "# Cost estimate sample",
         "",
         "Every figure is an estimate. `exact` = a price edited within two years; `city_band` = the "
-        "city's approximate range for the kind; `unknown` = Check on official site.",
+        "city's approximate range for the kind; `listed_free` = an older listing that says "
+        "free (0); "
+        "`unknown` = Check on official site.",
         "",
     ]
     for cost in sample:
@@ -284,6 +286,8 @@ def _report(
         f"visitor group, from fresh prices only: {t['bands_fresh']}, pooled with older or "
         f"undated: {t['bands_pooled']}",
         "- by kind: " + (", ".join(f"{k} {v}" for k, v in t["bands_by_kind"].items()) or "none"),
+        f"- counted per visitor group, too few paid prices for figures (counts only): "
+        f"{t['bands_without_figures']}; more free than paid prices: {t['bands_mostly_free']}",
         f"- cities with an eat band (food estimates possible): {t['eat_band_cities']}",
         "",
         "## Block estimates",
@@ -301,6 +305,7 @@ def _report(
     lines += [
         "",
         f"- stops with an exact price: {t['stops_exact']}, at a city band: {t['stops_band']}, "
+        f"listed as free (older listing): {t['stops_listed_free']}, "
         f'unknown ("{CHECK_OFFICIAL}"): {t["stops_unknown"]} (foreigner view)',
         f"- days from checked blocks: {t['days']}; with a figure: {t['days_with_figure']}",
         "",
@@ -378,7 +383,7 @@ def run_price_bands(
     ]
     prices = [price for _, price in listed]
     listing_by_key = {(p.page_id, p.ordinal): p for p in prices}
-    bands = build_bands(prices, rules)
+    bands = build_bands(prices, rules, city_currency)
 
     blocks, stops_by_block = _read(blocks_folder)
     try:
@@ -479,7 +484,8 @@ def run_price_bands(
                     }
                 )
 
-    pools = Counter(b["basis"] for b in bands.values())
+    figured = {k: b for k, b in bands.items() if b["median_minor"] is not None}
+    pools = Counter(b["basis"] for b in figured.values())
     totals = {
         "listings_priced": sum(n for s, n in counts.items() if s != "none"),
         "listings_exact": counts["exact"],
@@ -492,7 +498,9 @@ def run_price_bands(
         "bands_fresh": pools["fresh"],
         "bands_pooled": pools["all"],
         "bands_by_kind": dict(sorted(Counter(k[1] for k in {k[:3] for k in bands}).items())),
-        "eat_band_cities": len({k[0] for k in bands if k[1] == "eat"}),
+        "eat_band_cities": len({k[0] for k in figured if k[1] == "eat"}),
+        "bands_without_figures": len(bands) - len(figured),
+        "bands_mostly_free": sum(b["n_free"] > b["n_prices"] for b in bands.values()),
         "blocks": len(blocks),
         "blocks_by_completeness": {
             g: {c: completeness[g][c] for c in ("complete", "partial", "no_data")}
@@ -501,6 +509,7 @@ def run_price_bands(
         "stops_exact": stop_counts["exact"],
         "stops_band": stop_counts["city_band"],
         "stops_unknown": stop_counts["unknown"],
+        "stops_listed_free": stop_counts["listed_free"],
         "days": day_total,
         "days_with_figure": days_with_figure,
         "official_fees_applied": len(used_fees),

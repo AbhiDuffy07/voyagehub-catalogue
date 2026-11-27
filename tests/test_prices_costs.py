@@ -242,3 +242,24 @@ def test_one_edit_year_is_printed_once_and_two_years_as_a_range():
         ],
     )
     assert "(edited 2025-2026)" in two["foreigner"]["basis"]
+
+
+def test_a_stale_free_stop_costs_zero_not_the_paid_band():
+    stale_free = fresh([entry(free=True)], free=True, edit="2019-01-01")
+    paid = [fresh([entry(v)], ordinal=i + 2) for i, v in enumerate((100, 200, 300))]
+    bands = build_bands([stale_free, *paid], RULES)
+    result = estimate([stop_row()], [stale_free], bands)["foreigner"]
+    assert result["approx"] == {"low_minor": 0, "high_minor": 0, "stops": 1}
+    assert result["stop_basis"] == ["listed_free"] and result["unknown_stops"] == 0
+    assert result["total_low_minor"] == 0 and "listed as free" in result["basis"]
+
+
+def test_a_band_without_figures_is_no_band_for_stops_and_food():
+    old = fresh([entry(500)], edit="2019-01-01")
+    eat = [fresh([entry(free=True)], free=True, kind="eat", page=3, ordinal=i) for i in (1, 2, 3)]
+    frees = [fresh([entry(free=True)], free=True, ordinal=i) for i in (5, 6, 7)]
+    bands = build_bands([old, *eat, *frees], RULES, city_currency={7: "INR"})
+    assert bands[(7, "see", "INR", "foreigner")]["median_minor"] is None
+    result = estimate([stop_row()], [old], bands)["foreigner"]
+    assert result["unknown_stops"] == 1 and result["approx"]["stops"] == 0
+    assert result["food"] is None

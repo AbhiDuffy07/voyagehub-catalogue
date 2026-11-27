@@ -38,6 +38,10 @@ def test_city_file_has_summary_credit_timezone_and_tier(tmp_path):
     assert credit["licence"] == "CC BY-SA 4.0"
     assert credit["source_url"].startswith("https://en.wikipedia.org/")
     assert city["timezone"] == {"name": "Asia/Kolkata", "basis": "coordinates"}
+    assert city["country_iso"] == "IN" and city["country_name"] == "India"
+    assert result.totals["without_country_name"] == 0
+    assert result.totals["country_name_conflicts"] == 0
+    assert "country names: missing for 0 cities" in result.summary()
 
 
 def test_every_photo_keeps_author_licence_and_link(tmp_path):
@@ -76,7 +80,7 @@ def test_blocks_carry_stops_and_cost_with_basis(tmp_path):
     assert city["days"][0]["block_ids"] == ["jaipur-full"]
     (band,) = city["price_bands"]
     assert band["label"] == "approximate"
-    assert band["basis"] == "all"
+    assert band["basis"] == "all" and band["n_free"] == 2
 
 
 def test_index_lists_cities_with_hero_and_tier(tmp_path):
@@ -85,6 +89,7 @@ def test_index_lists_cities_with_hero_and_tier(tmp_path):
     by_slug = {c["slug"]: c for c in index["cities"]}
     assert set(by_slug) == {"jaipur", "agra"}
     assert by_slug["agra"]["tier"] == "browse_only"
+    assert by_slug["agra"]["country_name"] == "India"
     assert by_slug["jaipur"]["hero"]["thumb_url"] == "https://thumb.example/X.jpg"
     assert by_slug["jaipur"]["hero"]["credit"]["author"] == "Gerd Eichmann"
 
@@ -517,6 +522,20 @@ def test_the_site_root_has_a_small_landing_page_that_links_the_credits(tmp_path)
     assert 'href="/v1/attributions.json"' in page
     assert "<script" not in page and "http://" not in page and "@" not in page
     assert page == site_module.LANDING_PAGE
+    assert len(page.encode("utf-8")) < 4096
+
+
+def test_the_site_root_has_a_404_page_so_a_missing_file_is_not_answered_with_the_landing_page(
+    tmp_path,
+):
+    # Without a top-level 404.html, Cloudflare Pages treats the site as a single-page app and
+    # answers every unknown path with index.html and status 200.
+    result, _ = _build(tmp_path)
+    page = (result.site_dir / "404.html").read_text(encoding="utf-8")
+
+    assert page == site_module.NOT_FOUND_PAGE
+    assert "Not found" in page and 'href="/"' in page
+    assert "<script" not in page and "http://" not in page and "@" not in page
     assert len(page.encode("utf-8")) < 4096
 
 

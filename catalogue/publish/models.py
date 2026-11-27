@@ -106,6 +106,7 @@ class PriceBand(_Model):
     label: str
     n_prices: int | None
     n_fresh: int | None
+    n_free: int | None = None  # free prices counted beside the paid range (never in it)
 
 
 class RideApp(_Model):
@@ -120,7 +121,7 @@ class RideApps(_Model):
 
 class GettingAround(_Model):
     excerpt: Text | None  # the Wikivoyage "Get around" section, shortened
-    ride_apps: RideApps | None  # the country's ride apps (names and links only)
+    ride_apps: RideApps | None  # apps whose own site lists the city (names and links only)
 
 
 class CityFile(_Model):
@@ -128,6 +129,7 @@ class CityFile(_Model):
     slug: str = Field(pattern=SLUG)
     title: str
     country_iso: str | None
+    country_name: str | None  # the Wikivoyage country title, e.g. "India"
     tier: Tier
     summary: Text | None
     hero: Photo | None
@@ -143,6 +145,7 @@ class IndexCity(_Model):
     slug: str = Field(pattern=SLUG)
     title: str
     country_iso: str | None
+    country_name: str | None
     tier: Tier
     hero: Photo | None
     file: str
@@ -150,6 +153,7 @@ class IndexCity(_Model):
 
 class IndexShard(_Model):
     country_iso: str | None
+    country_name: str | None
     file: str
     cities: int
 

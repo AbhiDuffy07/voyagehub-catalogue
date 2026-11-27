@@ -74,6 +74,17 @@
           ],
           "title": "Country Iso"
         },
+        "country_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Country Name"
+        },
         "file": {
           "title": "File",
           "type": "string"
@@ -111,6 +122,7 @@
         "slug",
         "title",
         "country_iso",
+        "country_name",
         "tier",
         "hero",
         "file"
@@ -136,6 +148,17 @@
           ],
           "title": "Country Iso"
         },
+        "country_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Country Name"
+        },
         "file": {
           "title": "File",
           "type": "string"
@@ -143,6 +166,7 @@
       },
       "required": [
         "country_iso",
+        "country_name",
         "file",
         "cities"
       ],

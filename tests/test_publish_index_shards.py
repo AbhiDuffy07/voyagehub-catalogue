@@ -19,6 +19,7 @@ def fake_city(i, iso):
         "slug": slug,
         "title": f"Town Number {i}",
         "country_iso": iso,
+        "country_name": f"Country {iso}" if iso else None,
         "tier": "browse_only",
         "hero": {
             "thumb_url": f"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/{slug}.jpg/800px-{slug}.jpg",
@@ -73,6 +74,7 @@ def test_a_world_sized_index_over_2_mib_is_split_by_country_and_each_file_fits()
         doc = json.loads(files[shard["file"].removeprefix("/v1/")])
         assert shard["cities"] == len(doc["cities"])
         assert {c["country_iso"] for c in doc["cities"]} == {shard["country_iso"]}
+        assert shard["country_name"] == doc["cities"][0]["country_name"]
         seen += doc["cities"]
     assert sorted(seen, key=lambda c: c["slug"]) == cities  # nothing lost, nothing doubled
 

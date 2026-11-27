@@ -165,6 +165,8 @@ def test_report_and_sample_say_estimate_and_count_what_is_unknown(world):
     assert result.totals["blocks"] == 1 and result.totals["listings_exact"] == 4
     assert result.totals["listings_fresh_unreadable"] == 1
     assert "edited within two years but not read" in report
+    assert "too few paid prices for figures" in report and "listed as free" in report
+    assert {"bands_without_figures", "bands_mostly_free", "stops_listed_free"} <= set(result.totals)
 
 
 def test_a_second_run_is_identical(world):
@@ -177,7 +179,7 @@ def test_a_second_run_is_identical(world):
 def test_the_manifest_records_inputs_outputs_and_versions(world):
     result = run(world)
     manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["price_rules_version"] == 1 and manifest["country_filter"] == "IN"
+    assert manifest["price_rules_version"] == 2 and manifest["country_filter"] == "IN"
     assert set(manifest["inputs_sha256"]) >= {"listings.jsonl", "day_blocks.jsonl"}
     for name, digest in manifest["outputs_sha256"].items():
         assert sha(result.output_dir / name) == digest

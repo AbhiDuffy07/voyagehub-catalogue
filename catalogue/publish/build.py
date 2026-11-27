@@ -4,6 +4,7 @@ Nothing is guessed: a missing value stays empty. A photo or summary without a li
 left out and counted, because every published photo and summary must keep author, licence and link.
 """
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,12 +12,19 @@ from typing import Any
 from catalogue.blocks.inputs import _point
 from catalogue.publish.getting_around import (
     ContentRules,
+    apps_for,
     excerpt_of,
     load_content_rules,
     load_ride_apps,
 )
 from catalogue.publish.hero import HeroRules, author_problem, hero_problem, load_hero_rules
 from catalogue.publish.models import SCHEMA_VERSION
+from catalogue.publish.summary_text import (
+    SummaryRules,
+    adapted_attribution,
+    display_summary,
+    load_summary_rules,
+)
 
 COST_FIELDS = (
     "basis",
@@ -38,6 +46,7 @@ BAND_FIELDS = (
     "label",
     "n_prices",
     "n_fresh",
+    "n_free",
 )
 
 
@@ -57,9 +66,27 @@ class Upstream:
     counts: Counter = field(default_factory=Counter)
     stop_listings: dict[str, dict[str, Any]] = field(default_factory=dict)  # by listing_key
     sections: dict[int, dict[str, Any]] = field(default_factory=dict)  # "Get around", by page id
+    country_names: dict[str, str] = field(default_factory=dict)  # by ISO code, see country_names_of
     ride_apps: dict[str, dict[str, Any]] = field(default_factory=load_ride_apps)
     hero_rules: HeroRules = field(default_factory=load_hero_rules)
     content_rules: ContentRules = field(default_factory=load_content_rules)
+    summary_rules: SummaryRules = field(default_factory=load_summary_rules)
+
+
+_DISAMBIGUATOR = re.compile(r"\s*\([^()]*\)$")
+
+
+def country_names_of(rows: Any) -> tuple[dict[str, str], int]:
+    """ISO code to the Wikivoyage country title of the pages (fetch-listings section rows), without
+    a trailing disambiguator ("Georgia (country)" is "Georgia"). A code seen with two different
+    names gets none (never guessed); the second value counts those codes."""
+    seen: dict[str, set[str]] = {}
+    for row in rows:
+        iso, name = row.get("country_iso"), row.get("country")
+        if isinstance(iso, str) and iso and isinstance(name, str) and name.strip():
+            seen.setdefault(iso, set()).add(_DISAMBIGUATOR.sub("", name.strip()))
+    names = {iso: next(iter(found)) for iso, found in seen.items() if len(found) == 1}
+    return names, len(seen) - len(names)
 
 
 def _https(*urls: Any) -> bool:
@@ -108,21 +135,26 @@ def photo_of(
     }
 
 
-def text_of(row: dict[str, Any] | None, counts: Counter) -> dict[str, Any] | None:
+def text_of(
+    row: dict[str, Any] | None, counts: Counter, rules: SummaryRules
+) -> dict[str, Any] | None:
+    """The published summary: the display text (brackets out, two or three sentences) with the
+    stored credit, marked "adapted" when text was taken out. The stored row is not changed."""
     if not row or not row.get("summary"):
         return None
     source = row.get("permalink") or row.get("url")
     if not (row.get("licence") and row.get("attribution") and _https(source)):
         counts["summaries_left_out_no_credit"] += 1
         return None
+    shown = display_summary(row["summary"], rules)
     return {
-        "text": row["summary"],
+        "text": shown,
         "credit": {
             "author": "Wikipedia contributors",
             "licence": row["licence"],
             "licence_url": row.get("licence_url") or None,
             "source_url": source,
-            "attribution": row["attribution"],
+            "attribution": adapted_attribution(row["attribution"], row["summary"], shown),
             "history_url": row.get("history_url") or None,
         },
     }
@@ -149,7 +181,7 @@ def _place(listing: dict[str, Any], up: Upstream, is_stop: bool) -> dict[str, An
         "kind": listing.get("kind"),
         "lat": point[0] if point else None,
         "long": point[1] if point else None,
-        "summary": text_of(up.summaries.get(key), up.counts),
+        "summary": text_of(up.summaries.get(key), up.counts, up.summary_rules),
         "photo": photo,
     }
 
@@ -226,7 +258,7 @@ def _getting_around(row: dict[str, Any], pid: int, up: Upstream) -> dict[str, An
         }
     elif text:
         up.counts["getting_around_left_out_no_credit"] += 1
-    apps = up.ride_apps.get(str(row.get("country_iso") or ""))
+    apps = apps_for(up.ride_apps, row.get("country_iso"), row["slug"])
     return {"excerpt": excerpt, "ride_apps": apps}
 
 
@@ -288,8 +320,9 @@ def build_city(row: dict[str, Any], up: Upstream) -> dict[str, Any]:
         "slug": row["slug"],
         "title": row["title"],
         "country_iso": row.get("country_iso"),
+        "country_name": up.country_names.get(row.get("country_iso") or ""),
         "tier": row["tier"],
-        "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts),
+        "summary": text_of(up.summaries.get(("article", pid, 0)), up.counts, up.summary_rules),
         "hero": hero,
         "timezone": {"name": zone["timezone"], "basis": zone.get("timezone_basis")}
         if zone and zone.get("timezone")
