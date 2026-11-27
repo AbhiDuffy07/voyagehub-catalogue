@@ -525,6 +525,20 @@ def test_the_site_root_has_a_small_landing_page_that_links_the_credits(tmp_path)
     assert len(page.encode("utf-8")) < 4096
 
 
+def test_the_site_root_has_a_404_page_so_a_missing_file_is_not_answered_with_the_landing_page(
+    tmp_path,
+):
+    # Without a top-level 404.html, Cloudflare Pages treats the site as a single-page app and
+    # answers every unknown path with index.html and status 200.
+    result, _ = _build(tmp_path)
+    page = (result.site_dir / "404.html").read_text(encoding="utf-8")
+
+    assert page == site_module.NOT_FOUND_PAGE
+    assert "Not found" in page and 'href="/"' in page
+    assert "<script" not in page and "http://" not in page and "@" not in page
+    assert len(page.encode("utf-8")) < 4096
+
+
 def test_the_landing_page_is_the_same_in_every_build(tmp_path):
     first, kwargs = _build(tmp_path)
     second = run_publish_static(**{**kwargs, "out_dir": tmp_path / "publish2"})

@@ -3,8 +3,8 @@
 Reads the hash-checked outputs of earlier jobs for one dump and country filter, and writes
 `out/publish/<date>[-CC]/site/` (the folder that is deployed): `v1/cities/<slug>.json`,
 `v1/index.json`, `v1/attributions.json` (credits in `v1/attributions/part-NNN.json`),
-`v1/manifest.json` (version and hashes), `_headers` and a landing page `index.html`. A city is
-written only when readiness says published and it has a slug. Every file is validated against its
+`v1/manifest.json` (version and hashes), `_headers`, a landing page `index.html` and a `404.html`. A
+city is written only when readiness says published and it has a slug. Every file is validated against its
 pydantic model and size-checked before anything is written. Offline and deterministic. Error
 messages name files only (the logs are public).
 """
@@ -41,7 +41,7 @@ from catalogue.publish.models import (
     CityFile,
     ManifestFile,
 )
-from catalogue.publish.site import HEADERS, LANDING_PAGE, version_of
+from catalogue.publish.site import FIXED_FILES, version_of
 from catalogue.readiness.rules import ReadinessRules, load_readiness_rules
 from catalogue.readiness.run import (
     BLOCKS_FILE,
@@ -430,9 +430,10 @@ def run_publish_static(
         "parts": parts,
     }
     files["attributions.json"] = dump_document(AttributionsFile, attributions, "attributions.json")
-    if len(files) + 3 > limits.max_files:  # plus manifest.json, _headers and index.html
+    reserved = 1 + len(FIXED_FILES)  # manifest.json and the fixed files at the site root
+    if len(files) + reserved > limits.max_files:
         raise PipelineError(
-            f"{len(files) + 3} files, over the {limits.max_files} files limit; "
+            f"{len(files) + reserved} files, over the {limits.max_files} files limit; "
             "city files need bundling by country"
         )
 
@@ -503,8 +504,8 @@ def run_publish_static(
             path = staging / API / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-        (staging / "_headers").write_bytes(HEADERS.encode("utf-8"))
-        (staging / "index.html").write_bytes(LANDING_PAGE.encode("utf-8"))
+        for name, content in FIXED_FILES.items():
+            (staging / name).write_bytes(content.encode("utf-8"))
         if site.exists():
             shutil.rmtree(site)
         staging.rename(site)

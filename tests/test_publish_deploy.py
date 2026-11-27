@@ -151,6 +151,16 @@ def test_deploy_accepts_the_landing_page_and_refuses_a_changed_one(tmp_path):
         deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
 
 
+def test_deploy_accepts_the_404_page_and_refuses_a_changed_one(tmp_path):
+    site = _site(tmp_path)
+    assert (site / "404.html").is_file()
+    deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+    (site / "404.html").write_text("<p>changed</p>", encoding="utf-8")
+    with pytest.raises(PipelineError, match="404.html"):
+        deploy.deploy(site, project="p", branch=None, confirmed=True, runner=Recorder())
+
+
 def test_deploy_still_refuses_any_other_file_at_the_site_root(tmp_path):
     site = _site(tmp_path)
     (site / "other.html").write_text("x", encoding="utf-8")
